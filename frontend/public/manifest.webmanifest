@@ -1,0 +1,19 @@
+{
+  "name": "Expense Tracker",
+  "short_name": "Expense",
+  "description": "Private personal finance tracker",
+  "start_url": "/home",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8f5ef",
+  "theme_color": "#4c2f91",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
