@@ -166,7 +166,6 @@ function App() {
   const [activeTab, setActiveTab] = useState(initialTab);
   const [activeManager, setActiveManager] = useState(null);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [selectedPerson, setSelectedPerson] = useState(null);
   const [selectedObligation, setSelectedObligation] = useState(null);
   const [obligationReturnPath, setObligationReturnPath] = useState("/home");
   const [transactionVersion, setTransactionVersion] = useState(0);
@@ -242,7 +241,6 @@ function App() {
       setAuthUser(null);
       setAuthMode("login");
       setActiveManager(null);
-      setSelectedPerson(null);
       pushPath("/login");
       setPath("/login");
       showToast({
@@ -321,7 +319,6 @@ function App() {
     setAuthUser(user);
     setActiveTab("home");
     setActiveManager(null);
-    setSelectedPerson(null);
     pushPath("/home");
     setPath("/home");
     const firstName = user?.name?.split(" ")[0] || "there";
@@ -375,10 +372,27 @@ function App() {
 
   useEffect(() => {
     if (!authUser) return;
+    const legacyLedgerMatch = path.match(/^\/(?:people\/([^/]+)\/(?:ledger|personal-ledger)|person\/([^/]+)\/ledger|personal-ledger(?:\/([^/]+))?|person-ledger(?:\/([^/]+))?)\/?$/);
+    if (legacyLedgerMatch) {
+      const searchParams = new URLSearchParams(window.location.search);
+      const personId = legacyLedgerMatch.slice(1).find(Boolean)
+        || searchParams.get("personId")
+        || searchParams.get("person")
+        || searchParams.get("id");
+      const nextParams = new URLSearchParams();
+      if (personId) nextParams.set("personId", personId);
+      const queryString = nextParams.toString();
+      const nextPath = `/settlements${queryString ? `?${queryString}` : ""}`;
+      pushPath(nextPath);
+      setPath("/settlements");
+      setActiveManager(null);
+      setActiveTab("settlements");
+      return;
+    }
     const obligationId = path.match(/^\/obligations\/([^/]+)/)?.[1];
     if (obligationId) {
       let alive = true;
-      api.obligation(obligationId).then((data) => { if (alive) { setSelectedObligation(data); setSelectedPerson(null); } }).catch(() => { if (alive) setSelectedObligation(null); });
+      api.obligation(obligationId).then((data) => { if (alive) setSelectedObligation(data); }).catch(() => { if (alive) setSelectedObligation(null); });
       return () => { alive = false; };
     }
     setSelectedObligation(null);
@@ -389,7 +403,6 @@ function App() {
       return;
     }
     if (["home", "activity", "people", "settlements"].includes(next)) {
-      setSelectedPerson(null);
       setActiveManager(null);
       setActiveTab(next);
     }
@@ -450,8 +463,6 @@ function App() {
 
   const screen = selectedObligation
     ? "obligation-detail"
-    : selectedPerson
-    ? "person-detail"
     : activeManager
       ? activeManager
     : activeTab === "home"
@@ -459,7 +470,6 @@ function App() {
       : activeTab;
 
   const handleNavigate = (item) => {
-    setSelectedPerson(null);
     if (item.manager) {
       setActiveManager(item.id);
       setActiveTab("home");
@@ -473,10 +483,20 @@ function App() {
     setPath(item.id === "home" ? "/home" : `/${item.id}`);
   };
 
+  const handleSelectPerson = (personOrId) => {
+    const personId = typeof personOrId === "string" ? personOrId : personOrId?._id;
+    const params = new URLSearchParams();
+    if (personId) params.set("personId", personId);
+    const queryString = params.toString();
+    const nextPath = `/settlements${queryString ? `?${queryString}` : ""}`;
+    setActiveManager(null);
+    setActiveTab("settlements");
+    pushPath(nextPath);
+    setPath("/settlements");
+  };
+
   const pageTitle = selectedObligation
     ? "Payment Details"
-    : selectedPerson
-    ? selectedPerson.name
     : navigationItems.find((item) => item.id === screen)?.label || "Dashboard";
 
   return (
@@ -486,11 +506,10 @@ function App() {
         <DesktopTopHeader title={pageTitle} user={authUser} onAdd={() => setSheetOpen(true)} onLogout={handleLogout} onThemeChange={handleThemeChange} onNavigate={handleNavigate} locationKey={`${path}:${screen}`} refreshKey={transactionVersion} />
         {!online && <OfflineBanner />}
         <main className={`mx-auto min-h-screen w-full bg-paper shadow-[0_0_60px_rgba(55,42,82,0.08)] md:max-w-none md:bg-transparent md:px-5 md:pt-3 md:shadow-none lg:px-6 xl:max-w-[1560px] xl:px-8 ${screen === "obligation-detail" ? "pb-0 md:pb-10" : "pb-28 md:pb-10"}`}>
-        {screen === "home" && <HomeDashboard refreshKey={transactionVersion} user={authUser} onLogout={handleLogout} onThemeChange={handleThemeChange} onNavigate={handleNavigate} locationKey={`${path}:${screen}`} onSelectPerson={setSelectedPerson} onOpenObligation={(id) => { setObligationReturnPath("/home"); pushPath(`/obligations/${id}`); setPath(`/obligations/${id}`); }} onNavigateToSettlements={(view = "all", source = "", period = {}) => {
+        {screen === "home" && <HomeDashboard refreshKey={transactionVersion} user={authUser} onLogout={handleLogout} onThemeChange={handleThemeChange} onNavigate={handleNavigate} locationKey={`${path}:${screen}`} onNavigateToSettlements={(view = "all", source = "", period = {}) => {
           const params = new URLSearchParams({ ...(view && view !== "all" ? { view } : {}), ...(source ? { source } : {}), ...period });
           const queryString = params.toString();
           const nextPath = `/settlements${queryString ? `?${queryString}` : ""}`;
-          setSelectedPerson(null);
           setActiveManager(null);
           setActiveTab("settlements");
           pushPath(nextPath);
@@ -501,26 +520,21 @@ function App() {
           const nextPath = `/activity${queryString ? `?${queryString}` : ""}`;
           pushPath(nextPath);
           setActiveManager(null);
-          setSelectedPerson(null);
           setActiveTab("activity");
           setPath("/activity");
           setRouteVersion((version) => version + 1);
         }} />}
-        {screen === "activity" && <ActivityScreen key={routeVersion} refreshKey={transactionVersion} showToast={showToast} onSelectPerson={setSelectedPerson} onOpenSettlements={(view = "all", source = "") => {
+        {screen === "activity" && <ActivityScreen key={routeVersion} refreshKey={transactionVersion} showToast={showToast} onOpenSettlements={(view = "all", source = "") => {
           const params = new URLSearchParams({ ...(view && view !== "all" ? { view } : {}), ...(source ? { source } : {}) });
           const queryString = params.toString();
           const nextPath = `/settlements${queryString ? `?${queryString}` : ""}`;
           setActiveManager(null);
-          setSelectedPerson(null);
           setActiveTab("settlements");
           pushPath(nextPath);
           setPath("/settlements");
         }} />}
-        {screen === "people" && <PeopleScreen refreshKey={transactionVersion} onSelectPerson={setSelectedPerson} />}
+        {screen === "people" && <PeopleScreen refreshKey={transactionVersion} onSelectPerson={handleSelectPerson} />}
         {screen === "settlements" && <SettlementCenter refreshKey={transactionVersion} onSettled={() => setTransactionVersion((version) => version + 1)} onOpenObligation={(id) => { setObligationReturnPath("/settlements"); pushPath(`/obligations/${id}`); setPath(`/obligations/${id}`); }} />}
-        {screen === "person-detail" && (
-          <PersonDetail person={selectedPerson} refreshKey={transactionVersion} onBack={() => setSelectedPerson(null)} onFinancialChange={() => setTransactionVersion((version) => version + 1)} />
-        )}
         {screen === "obligation-detail" && <ObligationDetail data={selectedObligation} onBack={() => { setSelectedObligation(null); pushPath(obligationReturnPath); setPath(obligationReturnPath); }} onFinancialChange={() => setTransactionVersion((version) => version + 1)} />}
         {screen === "accounts" && <AccountsScreen refreshKey={transactionVersion} onBack={() => setActiveManager(null)} />}
         {screen === "categories" && <CategoriesScreen onBack={() => setActiveManager(null)} />}
@@ -534,7 +548,6 @@ function App() {
       <BottomNav
         activeTab={activeTab}
         onChange={(tab) => {
-          setSelectedPerson(null);
           setActiveManager(null);
           setActiveTab(tab);
           const nextPath = tab === "home" ? "/home" : `/${tab}`;
@@ -819,12 +832,12 @@ function PremiumHeader({ user, onLogout, onThemeChange, onNavigate, locationKey,
   useDismissablePopup({ open, onClose: () => setOpen(false), refs: [profileRef], closeKey: locationKey });
 
   return (
-    <div className="flex items-center justify-between md:hidden">
-      <div>
+    <div className="home-mobile-header flex items-start justify-between gap-3 md:hidden">
+      <div className="min-w-0 flex-1">
         <h1 className="text-2xl font-bold tracking-tight text-charcoal">Home Dashboard</h1>
         <p className="mt-0.5 text-xs font-medium text-muted">Your money overview at a glance</p>
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-2">
         <NotificationBell locationKey={locationKey} refreshKey={refreshKey} />
         <ThemeAction onThemeChange={onThemeChange} locationKey={locationKey} />
         <div ref={profileRef} className="relative">
@@ -1353,7 +1366,7 @@ function decodeVapidKey(value) {
   return Uint8Array.from(raw, (character) => character.charCodeAt(0));
 }
 
-function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, locationKey, onSelectPerson, onNavigateToActivity, onNavigateToSettlements, onOpenObligation }) {
+function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, locationKey, onNavigateToActivity, onNavigateToSettlements }) {
   const [period, setPeriod] = useState(readDashboardPeriod);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
@@ -1437,14 +1450,6 @@ function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, 
   const usableAccounts = accounts.items.filter((account) => account.isActive !== false && ["CASH", "BANK", "WALLET"].includes(String(account.type || "").toUpperCase()));
   const currentBalance = usableAccounts.reduce((total, account) => total + Number(account.currentBalance || 0), 0);
   const recentEvents = activity.items.slice(0, 6);
-  const uniquePeopleCount = (sourceTypes) => new Set(obligations.items
-    .filter((item) => sourceTypes.includes(item.sourceType) && item.direction === "RECEIVABLE" && Number(item.remainingAmount || 0) > 0 && item.person?._id)
-    .map((item) => String(item.person._id))).size;
-  const nextDue = (direction) => obligations.items
-    .filter((item) => item.direction === direction && Number(item.remainingAmount || 0) > 0 && !["SETTLED", "CANCELLED"].includes(item.status) && item.dueDate && new Date(item.dueDate).setHours(0, 0, 0, 0) > new Date().setHours(0, 0, 0, 0))
-    .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 4);
-  const payableDue = nextDue("PAYABLE");
-  const receivableDue = nextDue("RECEIVABLE");
   const openRecentEvent = async (event) => {
     const transaction = event.rootTransaction || event.transaction;
     if (transaction?._id && event.eventType !== "SETTLEMENT_ALLOCATED" && event.eventType !== "SETTLEMENT_REVERSED") {
@@ -1467,16 +1472,16 @@ function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, 
   }
 
   return (
-    <ScreenShell className="space-y-3 md:grid md:grid-cols-2 md:gap-3 md:space-y-0 xl:grid-cols-12 xl:gap-4">
-      <div className="md:col-span-2 xl:col-span-12 md:hidden">
+    <ScreenShell className="home-dashboard-shell space-y-3 md:grid md:grid-cols-2 md:gap-3 md:space-y-0 xl:grid-cols-12 xl:gap-4">
+      <div className="home-header-section md:col-span-2 xl:col-span-12 md:hidden">
         <PremiumHeader user={user} onLogout={onLogout} onThemeChange={onThemeChange} onNavigate={onNavigate} locationKey={locationKey} refreshKey={refreshKey} />
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 md:col-span-2 xl:col-span-12">
+      <div className="home-period-section flex flex-wrap items-center justify-between gap-2 md:col-span-2 xl:col-span-12">
         <p className="text-xs font-medium text-muted">Activity for {selectedPeriodLabel}</p>
         <DashboardPeriodFilter period={period} onApply={setPeriod} />
       </div>
 
-      <div className="grid grid-cols-2 gap-2.5 md:col-span-2 xl:col-span-12 xl:grid-cols-5">
+      <div className="home-summary-grid home-summary-section grid grid-cols-2 gap-2.5 md:col-span-2 xl:col-span-12 xl:grid-cols-5">
         <DashboardSummaryCard title="Current Balance" amount={formatCurrency(currentBalance)} caption="Cash, bank & wallet" icon={Wallet} tone="primary" className="col-span-2 xl:col-span-1" onClick={() => onNavigate(navigationItems.find((item) => item.id === "accounts"))} />
         <DashboardSummaryCard title="Income This Month" amount={formatCurrency(dashboard.incomeThisMonth)} caption={selectedPeriodLabel} icon={TrendingUp} tone="income" onClick={() => openActivity("INCOME")} />
         <DashboardSummaryCard title="Personal Expense" amount={formatCurrency(dashboard.personalExpense)} caption={selectedPeriodLabel} icon={TrendingDown} tone="coral" onClick={() => openActivity("EXPENSE")} />
@@ -1484,18 +1489,13 @@ function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, 
         <DashboardSummaryCard title="Total To Pay" amount={formatCurrency(dashboard.totalToPay)} caption={`Across ${(dashboard.peopleOutstanding || []).filter((item) => item.direction === "PAYABLE" && Number(item.amount || 0) > 0).length} people`} icon={ArrowUpRight} tone="coral" onClick={() => openSettlements("to-pay")} />
       </div>
 
-      <MoneyWithPeople dashboard={dashboard} obligations={obligations.items} onSelect={(view, source) => openSettlements(view, source)} onViewAll={() => openSettlements("all")} className="md:col-span-2 xl:col-span-6" />
+      <MoneyWithPeople dashboard={dashboard} obligations={obligations.items} onSelect={(view, source) => openSettlements(view, source)} onViewAll={() => openSettlements("all")} className="home-money-section md:col-span-2 xl:col-span-12" />
 
-      <section className="rounded-2xl border border-[#E5EAF0] bg-white p-3.5 shadow-[0_2px_8px_rgba(35,52,77,0.04)] md:col-span-2 xl:col-span-6">
-        <div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-bold">Upcoming Due</h2><p className="mt-0.5 text-[11px] text-muted">Payments and receipts due soon</p></div><button type="button" onClick={() => openSettlements("upcoming")} className="shrink-0 text-xs font-bold text-primary">View All →</button></div>
-        <div className="mt-3 grid gap-2 sm:grid-cols-2"><UpcomingDuePanel title="To Pay Due Soon" items={payableDue} direction="PAYABLE" loading={obligations.loading} onOpen={onOpenObligation} /><UpcomingDuePanel title="To Receive Due Soon" items={receivableDue} direction="RECEIVABLE" loading={obligations.loading} onOpen={onOpenObligation} /></div>
-      </section>
+      <PaymentsReceivablesSection dashboard={dashboard} partialCount={partialCount} settledTotal={dashboard.settledAllTime} onSelect={openSettlements} onViewAll={() => openSettlements("all")} className="home-payments-section md:col-span-2 xl:col-span-5" />
 
-      <RecentTransactionsSection events={recentEvents} loading={activity.loading} onViewAll={() => onNavigateToActivity({ ...(periodFilters || {}), sort: "newest" })} onOpen={openRecentEvent} className="md:col-span-2 xl:col-span-7" />
+      <RecentTransactionsSection events={recentEvents} loading={activity.loading} onViewAll={() => onNavigateToActivity({ ...(periodFilters || {}), sort: "newest" })} onOpen={openRecentEvent} className="home-recent-section md:col-span-2 xl:col-span-7" />
 
-      <PaymentsReceivablesSection dashboard={dashboard} partialCount={partialCount} settledTotal={dashboard.settledAllTime} onSelect={openSettlements} onViewAll={() => openSettlements("all")} className="md:col-span-2 xl:col-span-5" />
-
-      <section className="rounded-[1.25rem] bg-cream p-4 shadow-card md:col-span-2 xl:col-span-7">
+      <section className="home-dashboard-panel home-cashflow-section rounded-[1.25rem] bg-cream p-4 shadow-card md:col-span-2 xl:col-span-7">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-bold">Cash Flow</h2>
@@ -1515,7 +1515,7 @@ function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, 
         </div>
       </section>
 
-      <section className="rounded-[1.25rem] bg-cream p-4 shadow-card md:col-span-2 xl:col-span-5">
+      <section className="home-dashboard-panel home-categories-section rounded-[1.25rem] bg-cream p-4 shadow-card md:col-span-2 xl:col-span-5">
         <SectionTitle title="Spending Categories" />
         <ResourceState loading={reports.loading} error={reports.error} empty={!spendBars.length} onRetry={reports.refresh} emptyMessage="No personal expenses in this period." />
         <div className="mt-3 space-y-3">
@@ -1529,16 +1529,8 @@ function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, 
         </div>
       </section>
 
-      <section className="md:col-span-2 xl:col-span-12">
-        <h2 className="mb-3 text-base font-bold">People Summary</h2>
-        <div className="grid gap-3 md:grid-cols-2">
-          <OutstandingPeoplePanel title="You Have to Pay" direction="PAYABLE" items={dashboard.peopleOutstanding} onSelectPerson={onSelectPerson} />
-          <OutstandingPeoplePanel title="You Have to Receive" direction="RECEIVABLE" items={dashboard.peopleOutstanding} onSelectPerson={onSelectPerson} />
-        </div>
-      </section>
-
       {(selectedEvent || selectedTransaction) && (selectedTransaction
-        ? <TransactionDetailSheet transaction={selectedTransaction} onClose={() => setSelectedTransaction(null)} onSelectPerson={(person) => { setSelectedTransaction(null); onSelectPerson(person); }} onOpenSettlements={(view, source) => { setSelectedTransaction(null); openSettlements(view, source); }} />
+        ? <TransactionDetailSheet transaction={selectedTransaction} onClose={() => setSelectedTransaction(null)} onOpenSettlements={(view, source) => { setSelectedTransaction(null); openSettlements(view, source); }} />
         : <ActivityEventDetail event={selectedEvent} onClose={() => setSelectedEvent(null)} onOpenSource={(event) => { const transaction = event.rootTransaction || event.transaction; if (transaction?._id) { setSelectedEvent(null); api.get("transactions", transaction._id).then((detail) => setSelectedTransaction(detail.transaction || detail)).catch(() => {}); } }} />)}
 
     </ScreenShell>
@@ -1564,7 +1556,7 @@ function readDashboardPeriod() {
 
 function DashboardSummaryCard({ title, amount, caption, icon: Icon, tone, className = "", onClick }) {
   return (
-    <button type="button" onClick={onClick} className={`min-w-0 rounded-2xl border border-[#E4EAF0] p-3 text-left shadow-[0_2px_8px_rgba(35,52,77,0.04)] transition hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${tone === "income" ? "bg-[#F0FAF5]" : tone === "coral" ? "bg-[#FFF4F3]" : tone === "emerald" ? "bg-[#F1FAF8]" : "bg-[#F2F7FC]"} ${className}`}>
+    <button type="button" onClick={onClick} className={`home-summary-card home-summary-card-${tone} min-w-0 rounded-2xl border border-[#D8E1EA] p-3 text-left shadow-[0_2px_10px_rgba(35,52,77,0.07)] transition hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${tone === "income" ? "bg-[#DFF5ED]" : tone === "coral" ? "bg-[#FFE4E2]" : tone === "emerald" ? "bg-[#DFF5ED]" : "bg-violetSoft/80"} ${className}`}>
       <div className="flex min-w-0 items-center gap-2.5">
         <span className={`grid size-9 shrink-0 place-items-center rounded-full ${formatTone(tone)}`}><Icon size={17} /></span>
         <div className="min-w-0">
@@ -1848,15 +1840,19 @@ function MoneyWithPeople({ dashboard, obligations = [], onSelect, onViewAll, cla
     { label: "Someone Paid for Me", value: dashboard.someonePaidForMeOutstanding, count: peopleCount(["PAID_BY_SOMEONE"]), view: "to-pay", source: "PAID_BY_SOMEONE", tone: "coral", icon: Receipt }
   ];
   return (
-    <section className={`money-with-people-section w-full rounded-2xl border border-[#E5EAF0] bg-white shadow-[0_2px_8px_rgba(35,52,77,0.04)] ${className}`}>
+    <section className={`home-dashboard-panel money-with-people-section w-full rounded-2xl border border-[#D8E1EA] bg-white shadow-[0_2px_10px_rgba(35,52,77,0.07)] ${className}`}>
       <div className="money-with-people-header flex flex-wrap items-start justify-between gap-x-3 gap-y-2"><div className="min-w-0"><h2 className="text-base font-bold sm:text-lg">Money with People</h2><p className="mt-0.5 text-xs text-muted">Your settlements overview</p></div><button type="button" onClick={onViewAll} className="shrink-0 text-xs font-bold text-primary">View All →</button></div>
       <div className="money-with-people-grid mt-3 grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-4">
         {items.map((item) => (
-          <button key={item.label} type="button" onClick={() => onSelect(item.view, item.source)} className={`money-with-people-card min-w-0 rounded-xl border border-white/80 p-3 text-left transition hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary lg:p-3 xl:p-3.5 ${item.tone === "amber" ? "bg-[#FFF8E8]" : item.tone === "coral" ? "bg-[#FFF2F0]" : item.tone === "primary" ? "bg-[#F5F2FF]" : "bg-[#EFF9F5]"}`}>
-            <span className={`grid size-8 place-items-center rounded-full sm:size-9 ${formatTone(item.tone)}`}><item.icon size={16} /></span>
-            <p className="mt-2 min-h-[2.5em] max-w-[15ch] text-[13px] font-semibold leading-[1.25] text-muted">{item.label}</p>
-            <p className="mt-1 truncate text-base font-bold text-charcoal sm:text-[17px]">{formatCurrency(item.value || 0)}</p>
-            <p className="mt-1 text-xs font-medium text-muted">{item.count} {item.count === 1 ? "person" : "people"}</p>
+          <button key={item.label} type="button" onClick={() => onSelect(item.view, item.source)} className={`money-with-people-card home-tone-${item.tone} min-w-0 rounded-2xl border p-3 text-left shadow-[0_2px_10px_rgba(35,52,77,0.07)] transition hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${item.tone === "amber" ? "bg-[#FFF0C9] border-[#F6D783]" : item.tone === "coral" ? "bg-[#FFE4E2] border-[#FFC7C3]" : item.tone === "primary" ? "bg-violetSoft/80 border-primary/15" : "bg-[#DFF5ED] border-[#BFE9D8]"}`}>
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span className={`grid size-9 shrink-0 place-items-center rounded-full ${formatTone(item.tone)}`}><item.icon size={17} /></span>
+              <div className="min-w-0">
+                <p className="money-with-people-label text-[11px] font-semibold leading-[1.2] text-muted">{item.label}</p>
+                <p className="mt-0.5 truncate text-lg font-bold leading-5 tracking-tight text-charcoal">{formatCurrency(item.value || 0)}</p>
+                <p className="mt-0.5 truncate text-[10px] font-medium text-muted">{item.count} {item.count === 1 ? "person" : "people"}</p>
+              </div>
+            </div>
           </button>
         ))}
       </div>
@@ -1896,7 +1892,7 @@ function RecentTransactionsSection({ events, loading, onViewAll, onOpen, classNa
     <span className="hidden truncate text-[10px] text-muted md:block">{event.account?.name || "—"}</span><span className="hidden text-[10px] text-muted md:block">{formatShortDate(event.occurredAt)}</span>
     <span className={`hidden w-fit rounded-full px-2 py-1 text-[9px] font-bold md:inline-block ${pillTone(event)}`}>{typeLabel(event)}</span>
   </button>;
-  return <section className={`overflow-hidden rounded-2xl border border-[#E5EAF0] bg-white shadow-[0_2px_8px_rgba(35,52,77,0.04)] ${className}`}>
+  return <section className={`home-dashboard-panel overflow-hidden rounded-2xl border border-[#D8E1EA] bg-white shadow-[0_2px_10px_rgba(35,52,77,0.07)] ${className}`}>
     <div className="flex items-start justify-between gap-3 p-3.5"><div><h2 className="text-sm font-bold">Recent Transactions</h2><p className="mt-0.5 text-[11px] text-muted">Your latest activity across all accounts</p></div><button type="button" onClick={onViewAll} className="shrink-0 text-xs font-bold text-primary">View All →</button></div>
     <div className="hidden grid-cols-[minmax(0,1.3fr)_6.5rem_6rem_5.5rem_6.5rem] gap-3 border-y border-[#E8EDF2] bg-[#F8FAFC] px-3 py-2 text-[9px] font-bold uppercase tracking-wide text-muted md:grid"><span>Description</span><span className="text-right">Amount</span><span>Account</span><span>Date</span><span>Type</span></div>
     {loading && <div className="px-3 py-4 text-xs text-muted">Loading recent activity…</div>}
@@ -1915,113 +1911,20 @@ function PaymentsReceivablesSection({ dashboard, partialCount, settledTotal, onS
     { label: "Overdue Receivables", value: dashboard.receivableOverdue, tone: "amber", view: "overdue-receivables", direction: "RECEIVABLE", dateState: "OVERDUE" },
     { label: "Partial Settlements", value: partialCount, tone: "primary", view: "partial", status: "PARTIAL" }
   ];
-  return <section className={`rounded-2xl border border-[#E5EAF0] bg-white p-3.5 shadow-[0_2px_8px_rgba(35,52,77,0.04)] ${className}`}>
+  return <section className={`home-dashboard-panel rounded-2xl border border-[#D8E1EA] bg-white p-3.5 shadow-[0_2px_10px_rgba(35,52,77,0.07)] ${className}`}>
     <div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-bold">Payments &amp; Receivables</h2><p className="mt-0.5 text-[11px] text-muted">Track pending and completed payments</p></div><button type="button" onClick={onViewAll} className="shrink-0 text-right text-[10px] font-bold text-primary">View Payment Tracking →</button></div>
-    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">{metrics.map((metric) => <DashboardMetricButton key={metric.label} label={metric.label} value={metric.label === "Partial Settlements" ? String(metric.value || 0) : formatCurrency(metric.value || 0)} tone={metric.tone} onClick={() => onSelect(metric.view, "", false, { ...(metric.direction ? { direction: metric.direction } : {}), ...(metric.dateState ? { dateState: metric.dateState } : {}), ...(metric.status ? { status: metric.status } : {}) })} />)}</div>
+    <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3">{metrics.map((metric) => <DashboardMetricButton key={metric.label} label={metric.label} value={metric.label === "Partial Settlements" ? String(metric.value || 0) : formatCurrency(metric.value || 0)} tone={metric.tone} onClick={() => onSelect(metric.view, "", false, { ...(metric.direction ? { direction: metric.direction } : {}), ...(metric.dateState ? { dateState: metric.dateState } : {}), ...(metric.status ? { status: metric.status } : {}) })} />)}</div>
     <button type="button" onClick={() => onSelect("settled", "", false, { allTime: "true" })} className="mt-2 flex w-full items-center justify-between gap-3 rounded-xl bg-[#F3F0FF] px-3 py-2 text-left"><span className="text-[11px] font-semibold text-muted">Settled In All Time</span><span className="text-sm font-bold text-charcoal">{formatCurrency(settledTotal || 0)}</span></button>
   </section>;
 }
 
 function DashboardMetricButton({ label, value, tone, onClick }) {
   return (
-    <button type="button" onClick={onClick} className={`min-w-0 rounded-2xl p-3 text-left shadow-card ${formatTone(tone)}`}>
+    <button type="button" onClick={onClick} className={`home-metric-card home-tone-${tone} min-w-0 rounded-2xl border p-3 text-left shadow-card ${formatTone(tone)}`}>
       <p className="text-[11px] font-bold leading-4 opacity-80">{label}</p>
       <p className="mt-1 truncate text-base font-bold text-charcoal">{value}</p>
     </button>
   );
-}
-
-function OutstandingPeoplePanel({ title, direction, items = [], onSelectPerson }) {
-  const rows = items
-    .filter((item) => item.direction === direction && Number(item.amount || 0) > 0)
-    .sort((a, b) => Number(b.amount || 0) - Number(a.amount || 0));
-  const payable = direction === "PAYABLE";
-  const itemLabel = payable ? "open payment" : "open receivable";
-  const emptyMessage = payable ? "You have no outstanding payments." : "No money is currently owed to you.";
-  return (
-    <section className="rounded-[1.15rem] bg-cream p-4 shadow-card">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-bold">{title}</h3>
-        <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${payable ? "bg-coralSoft text-coral" : "bg-emeraldSoft text-emerald"}`}>
-          {payable ? "To Pay" : "To Receive"}
-        </span>
-      </div>
-      {!rows.length && <p className="mt-3 text-xs font-semibold text-muted">{emptyMessage}</p>}
-      {rows.length > 0 && (
-        <div className="mt-3 divide-y divide-[#E9E2D8]">
-          {rows.map((row) => (
-            <button
-              key={`${row.person._id}-${row.direction}`}
-              type="button"
-              onClick={() => onSelectPerson?.(row.person)}
-              className="w-full py-3 text-left first:pt-0 last:pb-0"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-bold">{row.person.name || "Unknown person"}</span>
-                  <span className="mt-0.5 block text-[10px] font-semibold text-muted">{row.count} {itemLabel}{row.count === 1 ? "" : "s"}</span>
-                </span>
-                <span className={`shrink-0 text-sm font-bold ${payable ? "text-coral" : "text-emerald"}`}>{formatCurrency(row.amount)}</span>
-              </div>
-              <PeopleBreakdownChips obligations={row.breakdown || []} direction={direction} />
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                {personDueLabels(row.breakdown || []).map((label) => (
-                  <span key={label} className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${label === "Overdue" ? "bg-coralSoft text-coral" : label === "Due Today" ? "bg-amberSoft text-amber" : "bg-paper text-muted"}`}>
-                    {label}
-                  </span>
-                ))}
-                <span className="rounded-full bg-paper px-2 py-0.5 text-[10px] font-bold text-primary">
-                  View Details
-                </span>
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function PeopleBreakdownChips({ obligations = [], direction }) {
-  const grouped = obligations
-    .filter((item) => Number(item.remainingAmount || 0) > 0)
-    .reduce((map, item) => {
-      const label = peopleBreakdownLabel(item.sourceType, direction);
-      map.set(label, Number(map.get(label) || 0) + Number(item.remainingAmount || 0));
-      return map;
-    }, new Map());
-  const chips = [...grouped.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
-  if (!chips.length) return null;
-  return (
-    <div className="mt-2 flex flex-wrap gap-1.5">
-      {chips.map(([label, amount]) => (
-        <span key={label} className="rounded-full bg-paper px-2 py-1 text-[10px] font-bold text-muted">
-          {label} {formatCurrency(amount)}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function peopleBreakdownLabel(sourceType, direction) {
-  return ({
-    BORROW: "Loan",
-    LEND: "Lent",
-    PAID_FOR_SOMEONE: "Paid for Someone",
-    PAID_BY_SOMEONE: "Paid for Me",
-    SPLIT_SHARE: "Split Expense"
-  })[sourceType] || (direction === "PAYABLE" ? "Payable" : "Receivable");
-}
-
-function personDueLabels(obligations = []) {
-  const labels = new Set();
-  obligations.forEach((item) => {
-    if (!item.dueDate || Number(item.remainingAmount || 0) <= 0) return;
-    if (item.dateState === "OVERDUE") labels.add("Overdue");
-    else if (item.dateState === "TODAY") labels.add("Due Today");
-    else if (item.dateState === "UPCOMING") labels.add("Upcoming");
-  });
-  return ["Overdue", "Due Today", "Upcoming"].filter((label) => labels.has(label));
 }
 
 function SkeletonBlock({ className = "" }) {
@@ -2474,7 +2377,7 @@ function FilterSection({ title, children }) {
   );
 }
 
-function ActivityScreen({ refreshKey, showToast, onSelectPerson, onOpenSettlements }) {
+function ActivityScreen({ refreshKey, showToast, onOpenSettlements }) {
   const [filters, setFilters] = useState(activityFiltersFromUrl);
   const [draftFilters, setDraftFilters] = useState(activityFiltersFromUrl);
   const [openPopup, setOpenPopup] = useState("");
@@ -2704,10 +2607,6 @@ function ActivityScreen({ refreshKey, showToast, onSelectPerson, onOpenSettlemen
       <TransactionDetailSheet
         transaction={selectedTransaction}
         onClose={() => setSelectedTransaction(null)}
-        onSelectPerson={(person) => {
-          setSelectedTransaction(null);
-          onSelectPerson?.(person);
-        }}
         onOpenSettlements={(view, source) => {
           setSelectedTransaction(null);
           onOpenSettlements?.(view, source);
@@ -2725,7 +2624,7 @@ function ActivityScreen({ refreshKey, showToast, onSelectPerson, onOpenSettlemen
   );
 }
 
-function SettlementHistoryCard({ settlement, onSelectPerson }) {
+function SettlementHistoryCard({ settlement }) {
   const direction = ["PAYMENT", "PAID_BY_ME"].includes(settlement.direction) ? "paid" : "received";
   const sourceTypes = new Set((settlement.allocations || []).map((allocation) => allocation.obligation?.sourceType));
   const settlementLabel = settlement.status === "CANCELLED" ? "Payment Reversed"
@@ -2737,9 +2636,9 @@ function SettlementHistoryCard({ settlement, onSelectPerson }) {
     <article className="rounded-3xl bg-cream p-4 shadow-card">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <button onClick={() => settlement.person && onSelectPerson?.(settlement.person)} className="text-left text-sm font-bold text-primary">
+          <span className="text-sm font-bold text-charcoal">
             {settlement.person?.name || "Settlement"}
-          </button>
+          </span>
           <p className="mt-1 text-xs font-semibold text-muted">{direction === "paid" ? "Paid to" : "Received from"} {settlement.person?.name || "person"} · {settlement.account?.name || "Account"} · {formatSettlementDateTime(settlement)}</p>
         </div>
         <div className="text-right">
@@ -3071,7 +2970,7 @@ function ActivityEventDetail({ event, onClose, onOpenSource }) {
   );
 }
 
-function TransactionDetailSheet({ transaction, onClose, onSelectPerson, onOpenSettlements }) {
+function TransactionDetailSheet({ transaction, onClose, onOpenSettlements }) {
   if (!transaction) return null;
   const meta = transactionMeta(transaction);
   const Icon = meta.icon;
@@ -3507,365 +3406,6 @@ function PersonCard({ person, onClick, onEdit, onDelete }) {
   );
 }
 
-function PersonDetail({ person, refreshKey = 0, onBack, onFinancialChange }) {
-  const [ledger, setLedger] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [settleOpen, setSettleOpen] = useState(false);
-  const [initialSettleObligationId, setInitialSettleObligationId] = useState("");
-  const [settleObligations, setSettleObligations] = useState([]);
-  const [settleTitle, setSettleTitle] = useState("Settle Up");
-  const [settleExactObligation, setSettleExactObligation] = useState(false);
-  const [settleAgainstLabel, setSettleAgainstLabel] = useState("");
-  const [openObligationVersion, setOpenObligationVersion] = useState(0);
-  const [detailObligationId, setDetailObligationId] = useState("");
-  const [detailObligationData, setDetailObligationData] = useState(null);
-  const defaultLedgerFilters = { ledgerType: "", balanceStatus: "", startDate: "", endDate: "", account: "", sort: "newest" };
-  const [filters, setFilters] = useState(defaultLedgerFilters);
-  const [draftFilters, setDraftFilters] = useState(defaultLedgerFilters);
-  const [filterOpen, setFilterOpen] = useState(false);
-  const filterButtonRef = useRef(null);
-  const query = useMemo(() => buildPersonLedgerQuery(filters), [filters]);
-  const accounts = useResource("accounts");
-  const allObligations = useResource("obligations", { person: person._id }, `${refreshKey}:${openObligationVersion}`);
-
-  const loadLedger = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      setLedger(await api.personLedger(person._id, query));
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadLedger();
-  }, [person._id, JSON.stringify(query), refreshKey]);
-
-  useEffect(() => {
-    if (!detailObligationId) return undefined;
-    let alive = true;
-    const ledgerItem = ledger?.obligations?.find((item) => item._id === detailObligationId);
-    if (ledgerItem) {
-      setDetailObligationData(ledgerItem);
-    } else {
-      api.obligation(detailObligationId)
-        .then((data) => {
-          if (alive && String(data.obligation?.person?._id || data.obligation?.person) === String(person._id)) {
-            setDetailObligationData({ ...data.obligation, settlements: data.allocations || [], events: data.events || [] });
-          }
-        })
-        .catch(() => {});
-    }
-    return () => { alive = false; };
-  }, [detailObligationId, ledger, person._id]);
-
-  const summary = ledger?.summary || {
-    totalToReceive: 0,
-    totalToPay: 0,
-    netBalance: 0,
-    pendingAmount: 0,
-    settledAmount: 0,
-    overduePayableAmount: 0,
-    overdueReceivableAmount: 0
-  };
-  const positive = summary.netBalance >= 0;
-  const openObligations = allObligations.items.filter((item) => Number(item.remainingAmount || 0) > 0 && !["SETTLED", "CANCELLED"].includes(item.status));
-  const detailObligation = ledger?.obligations?.find((item) => item._id === detailObligationId)
-    || (String(detailObligationData?._id) === String(detailObligationId) ? detailObligationData : null);
-  const openAmount = Number(summary.totalToPay || 0) + Number(summary.totalToReceive || 0);
-  const applyMetricFilter = (kind) => {
-    const next = { ...defaultLedgerFilters };
-    if (kind === "receive") next.ledgerType = "to_receive";
-    if (kind === "pay") next.ledgerType = "to_pay";
-    if (kind === "pending") next.balanceStatus = "open";
-    if (kind === "settled") { next.ledgerType = "history"; next.balanceStatus = "settled"; }
-    if (kind === "overdue_pay") next.balanceStatus = "overdue_payable";
-    if (kind === "overdue_receive") next.balanceStatus = "overdue_receivable";
-    setFilters(next);
-    setDraftFilters(next);
-  };
-  const openPersonTab = (tab) => {
-    const next = { ...defaultLedgerFilters };
-    if (tab === "to_pay") next.ledgerType = "to_pay";
-    if (tab === "to_receive") next.ledgerType = "to_receive";
-    if (tab === "settled") {
-      next.ledgerType = "history";
-      next.balanceStatus = "settled";
-    }
-    if (tab === "history") next.ledgerType = "history";
-    setFilters(next);
-    setDraftFilters(next);
-  };
-  const activePersonTab = filters.balanceStatus === "settled"
-    ? "settled"
-    : filters.ledgerType === "to_pay"
-      ? "to_pay"
-      : filters.ledgerType === "to_receive"
-        ? "to_receive"
-        : "history";
-  const openSettlementSheet = (items, title, exactObligation) => {
-    if (!items.length) return;
-    setSettleObligations(items);
-    setInitialSettleObligationId(exactObligation ? items[0]._id : "");
-    setSettleTitle(title);
-    setSettleExactObligation(exactObligation);
-    setSettleAgainstLabel(exactObligation ? personObligationHeading(items[0], person.name) : "");
-    setSettleOpen(true);
-  };
-  const openSettleUp = () => {
-    if (openAmount <= 0 || !openObligations.length || allObligations.loading) return;
-    openSettlementSheet(openObligations, "Settle Up", false);
-  };
-  const startDirectSettlement = (item) => {
-    if (Number(item.remainingAmount || 0) <= 0 || ["SETTLED", "CANCELLED"].includes(item.status)) return;
-    openSettlementSheet([item], item.direction === "PAYABLE" ? `Pay ${person.name}` : `Receive from ${person.name}`, true);
-  };
-  const ledgerTypeLabels = {
-    to_receive: "To Receive", to_pay: "To Pay", loan: "Loan", borrowed: "Loan Taken", lent: "Lend",
-    paid_for_someone: "Paid for Someone", someone_paid_for_me: "Someone Paid for Me", history: "History"
-  };
-  const balanceStatusLabels = {
-    open: "Pending", pending: "Pending", partial: "Partial", settled: "Settled",
-    overdue: "Overdue", overdue_payable: "Overdue to Pay", overdue_receivable: "Overdue to Receive"
-  };
-  const setLedgerFilter = (key, value) => {
-    const next = { ...draftFilters, [key]: value };
-    if (key === "ledgerType" && value) next.balanceStatus = "";
-    if (key === "balanceStatus" && value === "overdue_payable") next.ledgerType = "to_pay";
-    if (key === "balanceStatus" && value === "overdue_receivable") next.ledgerType = "to_receive";
-    setDraftFilters(next);
-  };
-
-  return (
-    <ScreenShell className="space-y-5">
-      <div className="flex items-center gap-3">
-        <button onClick={onBack} className="grid size-11 place-items-center rounded-2xl bg-cream shadow-card">
-          <ChevronLeft size={22} />
-        </button>
-        <div className="min-w-0">
-          <h1 className="truncate text-xl font-bold">{person.name}</h1>
-          <p className="text-sm font-semibold text-muted">Personal ledger</p>
-        </div>
-      </div>
-      <section className="rounded-3xl bg-cream p-5 text-center shadow-card">
-        <Avatar person={person} large />
-        <p className="mt-4 text-sm font-semibold text-muted">{positive ? "Net to receive" : "Net to pay"}</p>
-        <h2 className={`mt-1 text-4xl font-bold tracking-tight ${positive ? "text-emerald" : "text-coral"}`}>
-          {formatCurrency(Math.abs(summary.netBalance))}
-        </h2>
-        {!ledger && loading ? (
-          <p className="mt-5 rounded-2xl bg-paper px-4 py-3 text-sm font-semibold text-muted">Loading open balances…</p>
-        ) : !ledger ? (
-          <p className="mt-5 rounded-2xl bg-paper px-4 py-3 text-sm font-semibold text-muted">Settlement status is unavailable.</p>
-        ) : openAmount > 0 ? (
-          <button
-            type="button"
-            onClick={openSettleUp}
-            disabled={!openObligations.length || allObligations.loading}
-            className="mt-5 inline-flex items-center justify-center gap-2 rounded-2xl bg-emeraldSoft px-5 py-3 text-sm font-bold text-emerald disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <CheckCircle2 size={18} /> Settle Up
-          </button>
-        ) : (
-          <p className="mt-5 rounded-2xl bg-paper px-4 py-3 text-sm font-semibold text-muted">Nothing to settle. All payments with this person are settled.</p>
-        )}
-      </section>
-
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-        <LedgerMetric label="To Receive" value={summary.totalToReceive} tone="emerald" active={filters.ledgerType === "to_receive" && !filters.balanceStatus} onClick={() => applyMetricFilter("receive")} />
-        <LedgerMetric label="To Pay" value={summary.totalToPay} tone="coral" active={filters.ledgerType === "to_pay" && !filters.balanceStatus} onClick={() => applyMetricFilter("pay")} />
-        <LedgerMetric label="Pending" value={summary.pendingAmount} tone="amber" active={filters.balanceStatus === "open"} onClick={() => applyMetricFilter("pending")} />
-        <LedgerMetric label="Settled" value={summary.settledAmount} tone="income" active={filters.balanceStatus === "settled"} onClick={() => applyMetricFilter("settled")} />
-        <LedgerMetric label="Overdue to Pay" value={summary.overduePayableAmount} tone="coral" active={filters.balanceStatus === "overdue_payable"} onClick={() => applyMetricFilter("overdue_pay")} />
-        <LedgerMetric label="Overdue to Receive" value={summary.overdueReceivableAmount} tone="emerald" active={filters.balanceStatus === "overdue_receivable"} onClick={() => applyMetricFilter("overdue_receive")} />
-      </div>
-
-      <section className="rounded-3xl bg-cream p-3 shadow-card">
-        <div className="grid grid-cols-4 gap-2">
-          {[
-            { id: "to_pay", label: "To Pay" },
-            { id: "to_receive", label: "To Receive" },
-            { id: "settled", label: "Settled" },
-            { id: "history", label: "History" }
-          ].map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => openPersonTab(item.id)}
-              className={`rounded-2xl px-2 py-2.5 text-xs font-bold ${activePersonTab === item.id ? "bg-primary text-white" : "bg-paper text-muted"}`}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className="relative space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <FilterButton refProp={filterButtonRef} active={filterOpen} count={Object.entries(filters).filter(([key, value]) => value && !(key === "sort" && value === "newest")).length} onClick={() => { setDraftFilters(filters); setFilterOpen((open) => !open); }}>
-            <SlidersHorizontal size={16} /> Filter
-          </FilterButton>
-          <span className="text-xs font-semibold text-muted">{(ledger?.obligations || []).length} result{(ledger?.obligations || []).length === 1 ? "" : "s"}</span>
-        </div>
-        <ActiveFilterChips
-          chips={[
-            filters.ledgerType && { key: "ledgerType", label: ledgerTypeLabels[filters.ledgerType] || filters.ledgerType },
-            filters.balanceStatus && { key: "balanceStatus", label: balanceStatusLabels[filters.balanceStatus] || filters.balanceStatus },
-            filters.startDate && { key: "startDate", label: `From ${formatShortDate(filters.startDate)}` },
-            filters.endDate && { key: "endDate", label: `To ${formatShortDate(filters.endDate)}` },
-            filters.account && { key: "account", label: accounts.items.find((item) => item._id === filters.account)?.name || "Account" },
-            filters.sort !== "newest" && { key: "sort", label: sortOptions.find((item) => item.value === filters.sort)?.label || filters.sort }
-          ].filter(Boolean)}
-          onRemove={(chip) => { const next = { ...filters, [chip.key]: chip.key === "sort" ? "newest" : "" }; setFilters(next); setDraftFilters(next); }}
-          onClear={() => { setFilters(defaultLedgerFilters); setDraftFilters(defaultLedgerFilters); }}
-        />
-        <CompactPopover
-          open={filterOpen}
-          title="Ledger Filters"
-          triggerRef={filterButtonRef}
-          onClose={() => setFilterOpen(false)}
-          footer={<FilterActions onReset={() => setDraftFilters(defaultLedgerFilters)} onApply={() => { setFilters(draftFilters); setFilterOpen(false); }} />}
-        >
-          <FilterSelect label="Ledger" value={draftFilters.ledgerType} onChange={(value) => setLedgerFilter("ledgerType", value)} options={[{ value: "", label: "All" }, { value: "to_pay", label: "To Pay" }, { value: "to_receive", label: "To Receive" }, { value: "loan", label: "Loan" }, { value: "lent", label: "Lend" }, { value: "paid_for_someone", label: "Paid for Someone" }, { value: "someone_paid_for_me", label: "Someone Paid for Me" }, { value: "history", label: "History" }]} />
-          <FilterSelect label="State" value={draftFilters.balanceStatus} onChange={(value) => setLedgerFilter("balanceStatus", value)} options={[{ value: "", label: "Any State" }, { value: "open", label: "Pending" }, { value: "partial", label: "Partial" }, { value: "settled", label: "Settled" }, { value: "overdue", label: "Overdue" }, { value: "overdue_payable", label: "Overdue to Pay" }, { value: "overdue_receivable", label: "Overdue to Receive" }]} />
-          <FilterSelect label="Sort" value={draftFilters.sort} onChange={(value) => setDraftFilters({ ...draftFilters, sort: value })} options={sortOptions} />
-          <FilterSelect label="Account" value={draftFilters.account} onChange={(value) => setDraftFilters({ ...draftFilters, account: value })} options={resourceOptions(accounts.items, "All Accounts")} />
-          <FilterSection title="Person"><p className="rounded-2xl bg-paper px-4 py-3 text-sm font-semibold text-charcoal">{person.name}</p></FilterSection>
-          <div className="grid grid-cols-2 gap-3">
-            <FormInput label="Start Date" type="date" value={draftFilters.startDate} onChange={(value) => setDraftFilters({ ...draftFilters, startDate: value })} />
-            <FormInput label="End Date" type="date" value={draftFilters.endDate} onChange={(value) => setDraftFilters({ ...draftFilters, endDate: value })} />
-          </div>
-        </CompactPopover>
-      </section>
-
-      <section>
-        <SectionTitle title={filters.balanceStatus === "settled" ? "Settled Payments" : filters.ledgerType === "to_receive" ? "To Receive" : filters.ledgerType === "to_pay" ? "To Pay" : "Payment Details"} />
-        {ledger?.obligations?.length ? (
-          <div className="mt-3 space-y-3">
-            {ledger.obligations.map((item) => (
-              <article key={item._id} className="rounded-3xl bg-cream p-4 shadow-card">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-sm font-bold">{personObligationHeading(item, person.name)}</h3>
-                    <p className="mt-1 text-xs font-semibold text-muted">{obligationSystemLabel(item)} · {item.direction === "PAYABLE" ? "To Pay" : "To Receive"}</p>
-                  </div>
-                  <span className={`rounded-full px-3 py-1 text-xs font-bold ${obligationStatusTone(item)}`}>{obligationStatusLabel(item)}</span>
-                </div>
-                <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl bg-paper p-3">
-                  <div><p className="text-[10px] font-bold uppercase text-muted">Original</p><p className="mt-1 text-xs font-bold">{formatCurrency(item.originalAmount)}</p></div>
-                  <div><p className="text-[10px] font-bold uppercase text-muted">{item.direction === "PAYABLE" ? "Paid" : "Received"}</p><p className="mt-1 text-xs font-bold">{formatCurrency(item.settledAmount)}</p></div>
-                  <div><p className="text-[10px] font-bold uppercase text-muted">Remaining</p><p className="mt-1 text-xs font-bold">{formatCurrency(item.remainingAmount)}</p></div>
-                </div>
-                <p className="mt-3 text-xs font-semibold text-muted">
-                  {item.dueDate ? `${item.direction === "PAYABLE" ? "Due" : "Expected"} ${formatShortDate(item.dueDate)}` : "No due date"}
-                  {item.sourceTransaction?.account?.name ? ` · ${item.sourceTransaction.account.name}` : ""}
-                </p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {Number(item.remainingAmount || 0) > 0 && !["SETTLED", "CANCELLED"].includes(item.status) && (
-                    <button type="button" onClick={() => startDirectSettlement(item)} className="rounded-full bg-primary px-4 py-2 text-xs font-bold text-white">
-                      {item.direction === "PAYABLE" ? "Pay Now" : "Receive"}
-                    </button>
-                  )}
-                  <button type="button" onClick={() => { setDetailObligationId(item._id); setDetailObligationData(item); }} className="rounded-full bg-violetSoft px-4 py-2 text-xs font-bold text-primary">History</button>
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : <p className="mt-3 rounded-2xl bg-cream p-4 text-sm font-semibold text-muted">{filters.balanceStatus === "settled" ? "No settled payments for this filter." : "No payment records match these filters."}</p>}
-      </section>
-
-      {detailObligation && (
-        <section className="rounded-3xl bg-cream p-5 shadow-card">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-bold uppercase text-muted">{detailObligation.direction === "PAYABLE" ? "You have to pay" : "You have to receive"}</p>
-              <h2 className="mt-1 text-lg font-bold">{detailObligation.sourceTransaction?.note || detailObligation.sourceType.replaceAll("_", " ")}</h2>
-            </div>
-            <button onClick={() => { setDetailObligationId(""); setDetailObligationData(null); }} className="text-sm font-bold text-primary">Close</button>
-          </div>
-          <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
-            <div><p className="text-xs text-muted">Original</p><b>{formatCurrency(detailObligation.originalAmount)}</b></div>
-            <div><p className="text-xs text-muted">{detailObligation.direction === "PAYABLE" ? "Paid" : "Received"}</p><b>{formatCurrency(detailObligation.settledAmount)}</b></div>
-            <div><p className="text-xs text-muted">Remaining</p><b>{formatCurrency(detailObligation.remainingAmount)}</b></div>
-          </div>
-          <p className="mt-3 text-xs font-semibold text-muted">{itemDateLabel(detailObligation)} · {obligationStatusLabel(detailObligation)}</p>
-          <div className="mt-4 border-t border-line pt-3">
-            <p className="text-sm font-bold">History</p>
-            <div className="mt-3 space-y-3">
-              {buildObligationTimeline(detailObligation).map((entry) => {
-                const EntryIcon = entry.icon;
-                return (
-                  <div key={entry.id} className="flex gap-3">
-                    <span className={`mt-1 grid size-8 shrink-0 place-items-center rounded-xl ${entry.tone}`}><EntryIcon size={16} /></span>
-                    <div className="min-w-0 flex-1 rounded-2xl bg-paper p-3">
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div>
-                          <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${entry.tone}`}>{entry.label}</span>
-                          <p className="mt-2 text-xs font-semibold text-muted">{entry.date}</p>
-                        </div>
-                        {entry.amount != null && <b className="text-sm">{formatCurrency(entry.amount)}</b>}
-                      </div>
-                      <p className="mt-2 text-xs font-semibold text-charcoal">{entry.description}</p>
-                      {entry.remaining != null && <p className="mt-1 text-xs font-bold text-muted">Remaining {formatCurrency(entry.remaining)}</p>}
-                      {entry.statusChanged && <p className="mt-2 text-xs font-bold text-emerald">Status changed to Settled</p>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-          {detailObligation.remainingAmount > 0 && detailObligation.status !== "CANCELLED" && (
-            <button
-              onClick={() => startDirectSettlement(detailObligation)}
-              className="mt-4 w-full rounded-2xl bg-primary px-4 py-3 text-sm font-bold text-white"
-            >
-              {detailObligation.direction === "PAYABLE" ? "Pay Now" : "Receive"}
-            </button>
-          )}
-        </section>
-      )}
-
-      <section>
-        <SectionTitle title="History" />
-        {loading && <ResourceState loading error="" empty={false} />}
-        {error && <ResourceState loading={false} error={error} empty={false} />}
-        {ledger?.transactions?.length ? (
-          <div className="mt-3 space-y-3">
-            {ledger.transactions.map((transaction) => (
-              <TransactionRow key={transaction._id} transaction={transaction} />
-            ))}
-          </div>
-        ) : (
-          <p className="mt-3 rounded-3xl bg-cream p-4 text-sm font-semibold text-muted shadow-card">
-            No transaction history yet.
-          </p>
-        )}
-      </section>
-
-      <SettleSheet
-        open={settleOpen}
-        obligations={settleObligations}
-        initialObligationId={initialSettleObligationId}
-        title={settleTitle}
-        exactObligation={settleExactObligation}
-        exactDescription={settleAgainstLabel}
-        onClose={() => setSettleOpen(false)}
-        onSettled={async () => {
-          setSettleOpen(false);
-          setInitialSettleObligationId("");
-          setSettleObligations([]);
-          setOpenObligationVersion((version) => version + 1);
-          onFinancialChange?.();
-        }}
-      />
-    </ScreenShell>
-  );
-}
-
 function SettlementCenter({ refreshKey, onSettled, onOpenObligation }) {
   const resource = useResource("obligations", { history: "true" }, refreshKey);
   const people = useResource("people");
@@ -3898,7 +3438,7 @@ function SettlementCenter({ refreshKey, onSettled, onOpenObligation }) {
   const [tab, setTab] = useState(initialTab);
   const [filters, setFilters] = useState(() => ({
     ...emptyFilters,
-    person: settlementRoute.get("person") || "",
+    person: settlementRoute.get("personId") || settlementRoute.get("person") || "",
     direction: settlementRoute.get("direction") || ({ "upcoming-payments": "PAYABLE", "upcoming-receivables": "RECEIVABLE", "overdue-payments": "PAYABLE", "overdue-receivables": "RECEIVABLE" })[initialView] || "",
     status: settlementRoute.get("status") || (initialView === "partial" ? "PARTIAL" : ""),
     dateState: settlementRoute.get("dateState") || "",
@@ -3927,7 +3467,7 @@ function SettlementCenter({ refreshKey, onSettled, onOpenObligation }) {
     const view = viewByTab[tab];
     if (view) params.set("view", view);
     ["person", "direction", "status", "dateState", "source", "account", "category", "tag", "month", "year", "startDate", "endDate", "allTime"].forEach((key) => {
-      if (filters[key]) params.set(key, filters[key]);
+      if (filters[key]) params.set(key === "person" ? "personId" : key, filters[key]);
     });
     const queryString = params.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`);
@@ -3949,7 +3489,7 @@ function SettlementCenter({ refreshKey, onSettled, onOpenObligation }) {
       setTab(viewToTab[params.get("view")] || "All");
       setFilters((current) => ({
         ...current,
-        person: params.get("person") || "",
+        person: params.get("personId") || params.get("person") || "",
         direction: params.get("direction") || "",
         status: params.get("status") || "",
         dateState: params.get("dateState") || "",
@@ -4253,19 +3793,6 @@ function SettlementCenter({ refreshKey, onSettled, onOpenObligation }) {
       />
     </ScreenShell>
   );
-}
-
-function LedgerMetric({ label, value, tone, onClick, active = false }) {
-  const className = `rounded-3xl bg-cream p-4 text-left shadow-card ${onClick ? "w-full transition hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" : ""} ${active ? "ring-2 ring-primary/40" : ""}`;
-  const contents = <>
-    <p className="text-xs font-bold uppercase tracking-wide text-muted">{label}</p>
-    <h3 className={`mt-2 text-xl font-bold ${tone === "emerald" ? "text-emerald" : tone === "coral" ? "text-coral" : tone === "amber" ? "text-amber" : "text-charcoal"}`}>
-      {formatCurrency(value)}
-    </h3>
-  </>;
-  return onClick
-    ? <button type="button" onClick={onClick} aria-pressed={active} className={className}>{contents}</button>
-    : <article className={className}>{contents}</article>;
 }
 
 function settlementFilterDateRange(filters) {
@@ -5144,13 +4671,6 @@ function filterPeriodTitle(filters) {
   if (month) return month;
   if (filters.year) return filters.year;
   return "All Reports";
-}
-
-function buildPersonLedgerQuery(filters) {
-  return Object.entries(filters).reduce((query, [key, value]) => {
-    if (value) query[key] = value;
-    return query;
-  }, {});
 }
 
 function activeFilterChips(filters, resources = {}) {
