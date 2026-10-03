@@ -9,12 +9,14 @@ import Settlement from "../models/Settlement.js";
 import SettlementAllocation from "../models/SettlementAllocation.js";
 import Transaction from "../models/Transaction.js";
 import Notification from "../models/Notification.js";
+import User from "../models/User.js";
 import { applyAccountLedgerDelta } from "../services/accountingEngine.js";
 import { recordSettlementActivity, recordSettlementReversalActivity } from "../services/activityEventService.js";
 import { ensureUserObligations, recalculateObligation, refreshUserObligationStatuses } from "../services/obligationService.js";
 import asyncHandler from "../middleware/asyncHandler.js";
 import ApiError from "../utils/ApiError.js";
 import { successResponse } from "../utils/apiResponse.js";
+import { classifyObligation, normalizeFinanceTimeZone } from "../utils/financeRules.js";
 
 function requestKey(req) {
   const key = String(req.get("Idempotency-Key") || "").trim();
@@ -29,19 +31,17 @@ function payloadHash(req) {
 export const listObligations = asyncHandler(async (req, res) => {
   await ensureUserObligations(req.userId);
   await refreshUserObligationStatuses(req.userId);
+  const userSettings = await User.findById(req.userId).select("preferences.timezone").lean();
+  const timeZone = normalizeFinanceTimeZone(userSettings?.preferences?.timezone);
   const filter = { userId: req.userId };
   if (["PAYABLE", "RECEIVABLE"].includes(req.query.direction)) filter.direction = req.query.direction;
   if (req.query.person) filter.person = req.query.person;
-  if (req.query.status) filter.status = req.query.status;
-  if (["OVERDUE", "TODAY", "UPCOMING"].includes(req.query.due)) {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
-    filter.remainingAmount = { $gt: 0 };
-    filter.dueDate = req.query.due === "TODAY" ? { $gte: today, $lt: tomorrow } : req.query.due === "OVERDUE" ? { $lt: today } : { $gte: tomorrow };
-    filter.status = { $nin: ["SETTLED", "CANCELLED"] };
-  }
+  const requestedStatus = String(req.query.status || "").toUpperCase();
+  if (requestedStatus && !["PARTIAL", "OVERDUE"].includes(requestedStatus)) filter.status = requestedStatus === "PARTIALLY_SETTLED" ? "PARTIALLY_SETTLED" : requestedStatus;
+  const requestedState = String(req.query.dateState || req.query.due || "").toUpperCase();
+  const validStates = ["TODAY", "UPCOMING", "OVERDUE", "NO_DATE", "PARTIAL", "SETTLED"];
   if (req.query.history !== "true" && !filter.status) filter.status = { $ne: "CANCELLED" };
-  const obligations = await Obligation.find(filter)
+  let obligations = await Obligation.find(filter)
     .sort({ dueDate: 1, createdAt: -1 })
     .populate({ path: "person", match: { userId: req.userId }, select: "name" })
     .populate({
@@ -54,6 +54,20 @@ export const listObligations = asyncHandler(async (req, res) => {
         { path: "tags", match: { userId: req.userId }, select: "name color" }
       ]
     });
+  if (["PARTIAL", "OVERDUE"].includes(requestedStatus) || (requestedState && validStates.includes(requestedState))) {
+    obligations = obligations.filter((obligation) => {
+      const classification = classifyObligation(obligation, new Date(), timeZone);
+      if (requestedStatus === "PARTIAL" && classification.settlementState !== "PARTIAL") return false;
+      if (requestedStatus === "OVERDUE" && (classification.dateState !== "OVERDUE" || Number(obligation.remainingAmount || 0) <= 0 || ["SETTLED", "CANCELLED"].includes(obligation.status))) return false;
+      if (!requestedState || !validStates.includes(requestedState)) return true;
+      if (requestedState === "PARTIAL" || requestedState === "SETTLED") return classification.settlementState === requestedState;
+      return classification.dateState === requestedState && Number(obligation.remainingAmount || 0) > 0 && !["SETTLED", "CANCELLED"].includes(obligation.status);
+    });
+  }
+  obligations = obligations.map((obligation) => {
+    const classification = classifyObligation(obligation, new Date(), timeZone);
+    return { ...obligation.toObject(), ...classification };
+  });
   successResponse(res, obligations, "Obligations fetched");
 });
 
@@ -77,8 +91,15 @@ export const listSettlementHistory = asyncHandler(async (req, res) => {
   await refreshUserObligationStatuses(req.userId);
   const filter = { userId: req.userId };
   const dateRange = {};
-  if (req.query.startDate) dateRange.$gte = new Date(req.query.startDate);
-  if (req.query.endDate) dateRange.$lt = new Date(`${req.query.endDate}T23:59:59.999`);
+  if (req.query.startDate) {
+    dateRange.$gte = new Date(req.query.startDate);
+    dateRange.$gte.setHours(0, 0, 0, 0);
+  }
+  if (req.query.endDate) {
+    dateRange.$lt = new Date(req.query.endDate);
+    dateRange.$lt.setHours(0, 0, 0, 0);
+    dateRange.$lt.setDate(dateRange.$lt.getDate() + 1);
+  }
   if (req.query.month && req.query.year) {
     dateRange.$gte = new Date(Number(req.query.year), Number(req.query.month) - 1, 1);
     dateRange.$lt = new Date(Number(req.query.year), Number(req.query.month), 1);

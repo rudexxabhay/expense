@@ -7,10 +7,28 @@
   background: #f8f5ef;
   --color-primary: 76 47 145;
   --color-primary-soft: 238 232 255;
+  --app-root-font-size: 100%;
+  --app-font-scale: 1;
+  --space-xs: 0.5rem;
+  --space-sm: 0.75rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --radius-sm: 0.75rem;
+  --radius-md: 1.25rem;
+  --control-height: 2.9rem;
+  --button-height: 3rem;
+  --sidebar-width: 5.5rem;
+  --header-action-size: 2.75rem;
+  --card-padding: 1rem;
+  --mobile-bottom-nav-height: 4.875rem;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+html {
+  font-size: var(--app-root-font-size);
 }
 
 * {
@@ -28,9 +46,187 @@ body {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+.obligation-detail-content {
+  padding-bottom: calc(var(--mobile-bottom-nav-height) + 4.5rem + env(safe-area-inset-bottom, 0px) + 1rem);
+}
+
+.mobile-obligation-cta {
+  bottom: calc(var(--mobile-bottom-nav-height) + env(safe-area-inset-bottom, 0px) + 0.5rem);
+}
+
+.safe-area-bottom-nav {
+  bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (max-width: 360px) {
+  .money-with-people-header {
+    align-items: flex-start;
+  }
+
+  .money-with-people-header > button {
+    margin-left: auto;
+  }
+
+  .money-with-people-section > .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.money-with-people-section {
+  border-radius: var(--radius-md);
+  padding: var(--card-padding);
+}
+
+.money-with-people-grid {
+  gap: var(--space-sm);
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --app-root-font-size: 96%;
+    --app-font-scale: 0.96;
+    --space-sm: 0.8125rem;
+    --card-padding: 1.125rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .app-shell input:not([type="checkbox"]):not([type="radio"]),
+  .app-shell select {
+    min-height: var(--control-height);
+  }
+}
+
+@media (min-width: 1200px) {
+  :root {
+    --app-root-font-size: 90%;
+    --app-font-scale: 0.9;
+    --control-height: 2.9rem;
+    --button-height: 2.7rem;
+    --header-action-size: 2.5rem;
+    --card-padding: 1.25rem;
+    --space-sm: 0.875rem;
+    --radius-md: 1.25rem;
+  }
+
+  .app-sidebar nav button {
+    height: var(--button-height);
+  }
+
+  .app-sidebar > button {
+    height: var(--button-height);
+    min-height: var(--button-height);
+  }
+
+  .app-desktop-header {
+    min-height: 5rem;
+  }
+
+  .app-desktop-header h1 {
+    font-size: 2.35rem;
+  }
+
+  .app-header-action {
+    width: var(--header-action-size);
+    height: var(--header-action-size);
+  }
+
+  .app-sidebar > div:first-child > div:first-child {
+    width: 2.7rem;
+    height: 2.7rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  :root {
+    --sidebar-width: 13.5rem;
+  }
+
+  .app-shell {
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 768px) {
+  .obligation-detail-content {
+    padding-bottom: 1rem;
+  }
+}
+
 button,
 input {
   font: inherit;
+}
+
+button,
+a,
+[role="button"],
+input,
+select,
+textarea {
+  touch-action: manipulation;
+}
+
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+.transaction-sheet {
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 8px);
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+}
+
+@media (min-width: 768px) {
+  .transaction-sheet {
+    max-height: calc(100dvh - 3rem);
+  }
+}
+
+.transaction-sheet-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex-shrink: 0;
+  background: #fffcf7;
+}
+
+.transaction-sheet-content {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 0.5rem;
+}
+
+@media (max-height: 700px) and (max-width: 767px) {
+  .transaction-sheet {
+    padding-left: 1rem;
+    padding-right: 1rem;
+    padding-top: max(8px, env(safe-area-inset-top, 0px));
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+  }
+
+  .transaction-sheet-content > .transaction-type-content {
+    margin-top: 0.75rem;
+  }
+
+  .transaction-type-grid {
+    gap: 0.5rem;
+  }
+
+  .transaction-type-grid > button {
+    min-height: 4.25rem;
+    padding: 0.625rem;
+  }
+
+  .quick-expense-card {
+    padding: 0.5rem;
+  }
 }
 
 .no-scrollbar::-webkit-scrollbar {

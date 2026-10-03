@@ -93,7 +93,8 @@ function buildFilters(query, userId) {
     filters.repaymentStatus = { $in: OPEN_REPAYMENT_STATUSES };
     filters.remainingAmount = { $gt: 0 };
     delete filters.transactionDate;
-    filters.dueDate = dueDateMatch(due);
+    const dueMatch = dueDateMatch(due, query.timeZone);
+    if (dueMatch) Object.assign(filters, dueMatch);
   }
   if (query.balanceStatus === "pending") {
     filters.repaymentStatus = { $in: OPEN_REPAYMENT_STATUSES };

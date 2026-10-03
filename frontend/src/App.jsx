@@ -20,6 +20,7 @@ import {
   LogOut,
   Eye,
   EyeOff,
+  MoreHorizontal,
   Plus,
   Receipt,
   Search,
@@ -479,13 +480,13 @@ function App() {
     : navigationItems.find((item) => item.id === screen)?.label || "Dashboard";
 
   return (
-    <div className="min-h-screen text-charcoal md:grid md:grid-cols-[5.5rem_minmax(0,1fr)] xl:grid-cols-[13.5rem_minmax(0,1fr)]">
+    <div className="app-shell min-h-screen text-charcoal md:grid md:grid-cols-[5.5rem_minmax(0,1fr)] xl:grid-cols-[13.5rem_minmax(0,1fr)]">
       <ResponsiveSidebar activeTab={activeTab} activeManager={activeManager} onNavigate={handleNavigate} onAdd={() => setSheetOpen(true)} />
       <div className="min-w-0 md:min-h-screen">
         <DesktopTopHeader title={pageTitle} user={authUser} onAdd={() => setSheetOpen(true)} onLogout={handleLogout} onThemeChange={handleThemeChange} onNavigate={handleNavigate} locationKey={`${path}:${screen}`} refreshKey={transactionVersion} />
         {!online && <OfflineBanner />}
-        <main className="mx-auto min-h-screen w-full bg-paper pb-28 shadow-[0_0_60px_rgba(55,42,82,0.08)] md:max-w-none md:bg-transparent md:px-6 md:pb-10 md:pt-4 md:shadow-none lg:px-8 xl:max-w-[1480px] xl:px-10">
-        {screen === "home" && <HomeDashboard refreshKey={transactionVersion} user={authUser} onLogout={handleLogout} onThemeChange={handleThemeChange} onNavigate={handleNavigate} locationKey={`${path}:${screen}`} onSelectPerson={setSelectedPerson} onNavigateToSettlements={(view = "all", source = "", period = {}) => {
+        <main className={`mx-auto min-h-screen w-full bg-paper shadow-[0_0_60px_rgba(55,42,82,0.08)] md:max-w-none md:bg-transparent md:px-5 md:pt-3 md:shadow-none lg:px-6 xl:max-w-[1560px] xl:px-8 ${screen === "obligation-detail" ? "pb-0 md:pb-10" : "pb-28 md:pb-10"}`}>
+        {screen === "home" && <HomeDashboard refreshKey={transactionVersion} user={authUser} onLogout={handleLogout} onThemeChange={handleThemeChange} onNavigate={handleNavigate} locationKey={`${path}:${screen}`} onSelectPerson={setSelectedPerson} onOpenObligation={(id) => { setObligationReturnPath("/home"); pushPath(`/obligations/${id}`); setPath(`/obligations/${id}`); }} onNavigateToSettlements={(view = "all", source = "", period = {}) => {
           const params = new URLSearchParams({ ...(view && view !== "all" ? { view } : {}), ...(source ? { source } : {}), ...period });
           const queryString = params.toString();
           const nextPath = `/settlements${queryString ? `?${queryString}` : ""}`;
@@ -820,8 +821,8 @@ function PremiumHeader({ user, onLogout, onThemeChange, onNavigate, locationKey,
   return (
     <div className="flex items-center justify-between md:hidden">
       <div>
-        <p className="text-sm font-semibold text-muted">{greetingWithName(user)}</p>
-        <h1 className="mt-1 text-2xl font-bold tracking-tight text-charcoal">Money in focus</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-charcoal">Home Dashboard</h1>
+        <p className="mt-0.5 text-xs font-medium text-muted">Your money overview at a glance</p>
       </div>
       <div className="flex items-center gap-3">
         <NotificationBell locationKey={locationKey} refreshKey={refreshKey} />
@@ -829,7 +830,7 @@ function PremiumHeader({ user, onLogout, onThemeChange, onNavigate, locationKey,
         <div ref={profileRef} className="relative">
           <button
             onClick={() => setOpen((value) => !value)}
-            className="grid size-11 place-items-center rounded-2xl bg-primary text-sm font-bold text-white shadow-card"
+            className="app-header-action grid size-11 place-items-center rounded-2xl bg-primary text-sm font-bold text-white shadow-card"
           >
             {user?.initials || "U"}
           </button>
@@ -842,7 +843,7 @@ function PremiumHeader({ user, onLogout, onThemeChange, onNavigate, locationKey,
 
 function ResponsiveSidebar({ activeTab, activeManager, onNavigate, onAdd }) {
   return (
-    <aside className="hidden border-r border-[#ECE5D9] bg-cream/80 shadow-[10px_0_40px_rgba(67,54,94,0.06)] backdrop-blur md:sticky md:top-0 md:flex md:h-screen md:flex-col md:items-center md:px-3 md:py-5 xl:items-stretch xl:px-5">
+    <aside className="app-sidebar hidden border-r border-[#ECE5D9] bg-cream/80 shadow-[10px_0_40px_rgba(67,54,94,0.06)] backdrop-blur md:sticky md:top-0 md:flex md:h-screen md:flex-col md:items-center md:px-3 md:py-4 xl:items-stretch xl:px-4">
       <div className="mb-7 flex items-center justify-center gap-3 xl:justify-start">
         <div className="grid size-12 place-items-center rounded-2xl bg-primary text-white shadow-card">
           <Wallet size={23} />
@@ -898,13 +899,16 @@ function DesktopTopHeader({ title, user, onAdd, onLogout, onThemeChange, onNavig
   useDismissablePopup({ open, onClose: () => setOpen(false), refs: [profileRef], closeKey: locationKey });
 
   return (
-    <header className="hidden items-center justify-between px-6 py-5 md:flex lg:px-8 xl:px-10">
+    <header className="app-desktop-header hidden items-center justify-between px-5 py-4 md:flex lg:px-6 xl:px-8">
       <div>
-        <button className="flex items-center gap-2 rounded-full bg-cream px-4 py-2 text-sm font-bold text-primary shadow-card">
+        {title !== "Home" && <button className="flex items-center gap-2 rounded-full bg-cream px-4 py-2 text-sm font-bold text-primary shadow-card">
           <CalendarDays size={17} />
           {month}
-        </button>
-        <h1 className="mt-1 text-3xl font-bold tracking-tight xl:text-4xl">{title === "Home" ? greetingWithName(user) : title}</h1>
+        </button>}
+        <h1 className="mt-1 text-3xl font-bold tracking-tight xl:text-4xl">{title === "Home" ? "Home Dashboard" : title}</h1>
+        {title === "Home" && <p className="mt-0.5 text-xs font-medium text-muted">Your money overview at a glance</p>}
+        {title === "Activity" && <p className="mt-1 text-sm font-semibold text-muted">Clean financial history</p>}
+        {title === "Settlements" && <p className="mt-0.5 text-xs font-medium text-muted">Track what you need to pay and receive</p>}
       </div>
       <div className="flex items-center gap-3">
         <button
@@ -919,7 +923,7 @@ function DesktopTopHeader({ title, user, onAdd, onLogout, onThemeChange, onNavig
         <div ref={profileRef} className="relative">
           <button
             onClick={() => setOpen((value) => !value)}
-            className="grid size-11 place-items-center rounded-2xl bg-primary text-sm font-bold text-white shadow-card"
+            className="app-header-action grid size-11 place-items-center rounded-2xl bg-primary text-sm font-bold text-white shadow-card"
           >
             {user?.initials || "U"}
           </button>
@@ -965,7 +969,7 @@ function ThemeAction({ onThemeChange, locationKey }) {
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="grid size-11 place-items-center rounded-2xl bg-cream text-primary shadow-card"
+        className="app-header-action grid size-11 place-items-center rounded-2xl bg-cream text-primary shadow-card"
         aria-label="Theme"
       >
         <Sparkles size={19} />
@@ -1099,7 +1103,7 @@ function NotificationBell({ locationKey, refreshKey = 0 }) {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((value) => !value)}
-        className="relative grid size-11 place-items-center rounded-2xl bg-cream text-primary shadow-card"
+        className="app-header-action relative grid size-11 place-items-center rounded-2xl bg-cream text-primary shadow-card"
         aria-label="Notifications"
       >
         <Bell size={20} />
@@ -1245,7 +1249,7 @@ function ObligationDetail({ data, onBack, onFinancialChange }) {
   const reference = transactionReference(obligation.sourceTransaction || { _id: obligation.sourceTransactionId, type: sourceType, transactionDate: createdDate });
   const showAction = remaining > 0 && obligation.status !== "CANCELLED";
   return (
-    <ScreenShell className="mx-auto max-w-[920px] pb-36 md:pb-4">
+    <ScreenShell className="obligation-detail-content mx-auto max-w-[920px]">
       <header className="mb-5 flex items-center gap-3">
         <button type="button" aria-label="Go back" onClick={onBack} className="grid size-11 shrink-0 place-items-center rounded-full bg-cream text-charcoal shadow-card hover:bg-paper"><ChevronLeft size={21} /></button>
         <h1 className="text-xl font-bold text-charcoal">{sourceType === "BORROW" || sourceType === "LEND" ? "Loan Details" : "Payment Details"}</h1>
@@ -1268,7 +1272,7 @@ function ObligationDetail({ data, onBack, onFinancialChange }) {
                 <span>{obligation.dueDate ? `${payable ? "Due" : "Expected"}: ${new Date(obligation.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : "No due date"}</span>
               </div>
             </div>
-            {showAction && <button type="button" onClick={() => setPayOpen(true)} className="mt-4 hidden min-h-12 w-full items-center justify-center rounded-2xl bg-primary px-5 text-sm font-bold text-white shadow-card hover:opacity-90 md:flex">{payable ? "Pay" : "Receive"} {formatCurrency(remaining)}</button>}
+            {showAction && <button type="button" onClick={() => setPayOpen(true)} className="mt-4 hidden min-h-12 w-full items-center justify-center rounded-2xl bg-primary px-5 text-sm font-bold text-white shadow-card hover:opacity-90 md:flex lg:hidden">{payable ? "Pay" : "Receive"} {formatCurrency(remaining)}</button>}
           </section>
           <section className="rounded-3xl bg-cream p-5 shadow-card sm:p-6">
             <h3 className="text-base font-bold text-charcoal">{payable ? "Payment History" : "Receipt History"}</h3>
@@ -1326,7 +1330,7 @@ function ObligationDetail({ data, onBack, onFinancialChange }) {
             </div>}
           </section>
         </div>
-        <aside className="hidden rounded-3xl bg-cream p-5 shadow-card lg:sticky lg:top-6 lg:block">
+        <aside className="hidden rounded-3xl bg-cream p-5 shadow-card lg:block">
           <p className="text-xs font-bold uppercase tracking-wide text-muted">Current Status</p>
           <p className="mt-2 text-lg font-bold text-charcoal">{statusText}</p>
           <p className="mt-5 text-xs font-semibold text-muted">{payable ? "Remaining to pay" : "Remaining to receive"}</p>
@@ -1336,7 +1340,7 @@ function ObligationDetail({ data, onBack, onFinancialChange }) {
           {showAction && <button type="button" onClick={() => setPayOpen(true)} className="mt-5 min-h-12 w-full rounded-2xl bg-primary px-4 text-sm font-bold text-white">{payable ? "Pay" : "Receive"} {formatCurrency(remaining)}</button>}
         </aside>
       </div>
-      {showAction && <div className="fixed inset-x-0 bottom-[9.5rem] z-30 border-t border-charcoal/5 bg-paper/95 p-3 pb-3 backdrop-blur md:hidden">
+      {showAction && <div className="mobile-obligation-cta fixed inset-x-0 z-30 border-t border-charcoal/5 bg-paper/95 p-3 backdrop-blur md:hidden">
         <button type="button" onClick={() => setPayOpen(true)} className="mx-auto flex min-h-12 w-full max-w-[560px] items-center justify-center rounded-2xl bg-primary px-5 text-sm font-bold text-white shadow-card">{payable ? "Pay Remaining" : "Receive Remaining"} {formatCurrency(remaining)}</button>
       </div>}
       <SettleSheet open={payOpen} obligations={[obligation]} initialObligationId={obligation._id} title={`${payable ? "Pay" : "Receive from"} ${personName}`} exactObligation exactDescription={sourceTitle} onClose={() => setPayOpen(false)} onSettled={async () => { setPayOpen(false); await onFinancialChange?.(); }} />
@@ -1349,31 +1353,43 @@ function decodeVapidKey(value) {
   return Uint8Array.from(raw, (character) => character.charCodeAt(0));
 }
 
-function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, locationKey, onSelectPerson, onNavigateToActivity, onNavigateToSettlements }) {
+function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, locationKey, onSelectPerson, onNavigateToActivity, onNavigateToSettlements, onOpenObligation }) {
   const [period, setPeriod] = useState(readDashboardPeriod);
-  const [accountsOpen, setAccountsOpen] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [selectedTransaction, setSelectedTransaction] = useState(null);
   const accounts = useResource("accounts", {}, refreshKey);
+  const obligations = useResource("obligations", {}, refreshKey);
+  const activityParams = useMemo(() => period.allTime
+    ? { sort: "newest", limit: 100 }
+    : period.startDate || period.endDate
+      ? { ...(period.startDate ? { startDate: period.startDate } : {}), ...(period.endDate ? { endDate: period.endDate } : {}), sort: "newest", limit: 100 }
+      : { month: period.month, year: period.year, sort: "newest", limit: 100 }, [period]);
+  const activity = useResource("activity", activityParams, refreshKey);
   useLayoutEffect(() => {
     if (window.location.pathname !== "/home") return;
     const params = new URLSearchParams();
-    if (period.startDate || period.endDate) {
-      if (period.startDate) params.set("startDate", period.startDate);
-      if (period.endDate) params.set("endDate", period.endDate);
-    } else {
-      params.set("month", period.month);
-      params.set("year", period.year);
+    if (!period.allTime) {
+      if (period.startDate || period.endDate) {
+        if (period.startDate) params.set("startDate", period.startDate);
+        if (period.endDate) params.set("endDate", period.endDate);
+      } else {
+        params.set("month", period.month);
+        params.set("year", period.year);
+      }
     }
     const query = params.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
   }, [period]);
-  const periodFilters = useMemo(() => period.startDate || period.endDate
+  const periodFilters = useMemo(() => period.allTime
+    ? { allTime: "true" }
+    : period.startDate || period.endDate
     ? { startDate: period.startDate, endDate: period.endDate }
     : { month: period.month, year: period.year }, [period]);
-  const openActivity = (dashboardFilter, includePeriod = true, extra = {}) => {
-    onNavigateToActivity({ dashboardFilter, ...(includePeriod ? periodFilters : {}), ...extra, sort: "newest" });
+  const openActivity = (type = "", includePeriod = true, extra = {}) => {
+    onNavigateToActivity({ ...(type ? { type } : {}), ...(includePeriod ? periodFilters : {}), ...extra, sort: "newest" });
   };
-  const openSettlements = (view, source = "", includePeriod = false) => {
-    onNavigateToSettlements(view, source, includePeriod ? periodFilters : {});
+  const openSettlements = (view, source = "", includePeriod = false, extra = {}) => {
+    onNavigateToSettlements(view, source, { ...(includePeriod ? periodFilters : {}), ...extra });
   };
   const summary = useTransactionSummary(period, refreshKey);
   const reports = useTransactionReports(period, refreshKey);
@@ -1384,7 +1400,9 @@ function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, 
     value: Math.round((Number(item.total || 0) / categoryMax) * 100),
     color: item.color || "coral"
   }));
-  const selectedPeriodLabel = period.startDate || period.endDate
+  const selectedPeriodLabel = period.allTime
+    ? "All Time"
+    : period.startDate || period.endDate
     ? `${period.startDate ? formatShortDate(period.startDate) : "Beginning"} - ${period.endDate ? formatShortDate(period.endDate) : "Today"}`
     : new Date(Number(period.year), Number(period.month) - 1, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
   const dashboard = summary.data || {
@@ -1406,6 +1424,7 @@ function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, 
     receivableToday: 0,
     receivableUpcoming: 0,
     receivableOverdue: 0,
+    settledAllTime: 0,
     partialSettlementCount: 0,
     peopleOutstanding: []
   };
@@ -1415,8 +1434,32 @@ function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, 
     { label: "Expense", value: Math.round((Number(dashboard.expenseThisMonth || 0) / maxFlow) * 100), color: "bg-coral" }
   ];
   const partialCount = dashboard.partialSettlementCount || 0;
+  const usableAccounts = accounts.items.filter((account) => account.isActive !== false && ["CASH", "BANK", "WALLET"].includes(String(account.type || "").toUpperCase()));
+  const currentBalance = usableAccounts.reduce((total, account) => total + Number(account.currentBalance || 0), 0);
+  const recentEvents = activity.items.slice(0, 6);
+  const uniquePeopleCount = (sourceTypes) => new Set(obligations.items
+    .filter((item) => sourceTypes.includes(item.sourceType) && item.direction === "RECEIVABLE" && Number(item.remainingAmount || 0) > 0 && item.person?._id)
+    .map((item) => String(item.person._id))).size;
+  const nextDue = (direction) => obligations.items
+    .filter((item) => item.direction === direction && Number(item.remainingAmount || 0) > 0 && !["SETTLED", "CANCELLED"].includes(item.status) && item.dueDate && new Date(item.dueDate).setHours(0, 0, 0, 0) > new Date().setHours(0, 0, 0, 0))
+    .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 4);
+  const payableDue = nextDue("PAYABLE");
+  const receivableDue = nextDue("RECEIVABLE");
+  const openRecentEvent = async (event) => {
+    const transaction = event.rootTransaction || event.transaction;
+    if (transaction?._id && event.eventType !== "SETTLEMENT_ALLOCATED" && event.eventType !== "SETTLEMENT_REVERSED") {
+      try {
+        const detail = await api.get("transactions", transaction._id);
+        setSelectedTransaction(detail.transaction || detail);
+      } catch {
+        setSelectedEvent(event);
+      }
+      return;
+    }
+    setSelectedEvent(event);
+  };
 
-  if (summary.loading && !summary.data) {
+  if ((summary.loading && !summary.data) || accounts.loading || obligations.loading || activity.loading) {
     return <HomeSkeleton user={user} onLogout={onLogout} onThemeChange={onThemeChange} onNavigate={onNavigate} />;
   }
   if (summary.error && !summary.data) {
@@ -1424,53 +1467,33 @@ function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, 
   }
 
   return (
-    <ScreenShell className="space-y-4 md:grid md:grid-cols-2 md:gap-4 md:space-y-0 xl:grid-cols-12 xl:gap-5">
+    <ScreenShell className="space-y-3 md:grid md:grid-cols-2 md:gap-3 md:space-y-0 xl:grid-cols-12 xl:gap-4">
       <div className="md:col-span-2 xl:col-span-12 md:hidden">
         <PremiumHeader user={user} onLogout={onLogout} onThemeChange={onThemeChange} onNavigate={onNavigate} locationKey={locationKey} refreshKey={refreshKey} />
       </div>
-      <header className="flex flex-wrap items-center justify-between gap-3 md:col-span-2 xl:col-span-12">
-        <div>
-          <h1 className="text-xl font-bold">Financial Summary</h1>
-          <p className="mt-1 text-xs font-semibold text-muted">Current balances · activity for {selectedPeriodLabel}</p>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 md:col-span-2 xl:col-span-12">
+        <p className="text-xs font-medium text-muted">Activity for {selectedPeriodLabel}</p>
         <DashboardPeriodFilter period={period} onApply={setPeriod} />
-      </header>
-
-      <div className="grid grid-cols-2 gap-3 md:col-span-2 xl:col-span-12 xl:grid-cols-5">
-        <DashboardSummaryCard title="Your Money" amount={formatCurrency(dashboard.availableMoney)} caption="Current balance" icon={Wallet} tone="primary" featured onClick={() => setAccountsOpen((open) => !open)} />
-        <DashboardSummaryCard title="Income" amount={formatCurrency(dashboard.incomeThisMonth)} caption={selectedPeriodLabel} icon={TrendingUp} tone="income" onClick={() => openActivity("income")} />
-        <DashboardSummaryCard title="Personal Expense" amount={formatCurrency(dashboard.personalExpense)} caption={selectedPeriodLabel} icon={TrendingDown} tone="coral" onClick={() => openActivity("personal_expense")} />
-        <DashboardSummaryCard title="To Receive" amount={formatCurrency(dashboard.totalToReceive)} caption="Current outstanding" icon={ArrowDownLeft} tone="emerald" onClick={() => openSettlements("to-receive")} />
-        <DashboardSummaryCard title="To Pay" amount={formatCurrency(dashboard.totalToPay)} caption="Current outstanding" icon={ArrowUpRight} tone="coral" onClick={() => openSettlements("to-pay")} />
       </div>
 
-      {accountsOpen && <div className="md:col-span-2 xl:col-span-12"><AccountBalanceList accounts={accounts} total={dashboard.availableMoney} onSelect={(account) => openActivity("account_history", false, { account: account._id })} /></div>}
+      <div className="grid grid-cols-2 gap-2.5 md:col-span-2 xl:col-span-12 xl:grid-cols-5">
+        <DashboardSummaryCard title="Current Balance" amount={formatCurrency(currentBalance)} caption="Cash, bank & wallet" icon={Wallet} tone="primary" className="col-span-2 xl:col-span-1" onClick={() => onNavigate(navigationItems.find((item) => item.id === "accounts"))} />
+        <DashboardSummaryCard title="Income This Month" amount={formatCurrency(dashboard.incomeThisMonth)} caption={selectedPeriodLabel} icon={TrendingUp} tone="income" onClick={() => openActivity("INCOME")} />
+        <DashboardSummaryCard title="Personal Expense" amount={formatCurrency(dashboard.personalExpense)} caption={selectedPeriodLabel} icon={TrendingDown} tone="coral" onClick={() => openActivity("EXPENSE")} />
+        <DashboardSummaryCard title="Total To Receive" amount={formatCurrency(dashboard.totalToReceive)} caption={`Across ${(dashboard.peopleOutstanding || []).filter((item) => item.direction === "RECEIVABLE" && Number(item.amount || 0) > 0).length} people`} icon={ArrowDownLeft} tone="emerald" onClick={() => openSettlements("to-receive")} />
+        <DashboardSummaryCard title="Total To Pay" amount={formatCurrency(dashboard.totalToPay)} caption={`Across ${(dashboard.peopleOutstanding || []).filter((item) => item.direction === "PAYABLE" && Number(item.amount || 0) > 0).length} people`} icon={ArrowUpRight} tone="coral" onClick={() => openSettlements("to-pay")} />
+      </div>
 
-      <MoneyWithPeople dashboard={dashboard} onSelect={(view, source) => openSettlements(view, source)} />
+      <MoneyWithPeople dashboard={dashboard} obligations={obligations.items} onSelect={(view, source) => openSettlements(view, source)} onViewAll={() => openSettlements("all")} className="md:col-span-2 xl:col-span-6" />
 
-      <section className="rounded-[1.25rem] bg-cream p-4 shadow-card md:col-span-2 xl:col-span-12">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-base font-bold">Payments &amp; Receivables</h2>
-          <button type="button" onClick={() => openSettlements("all")} className="shrink-0 text-xs font-bold text-primary">View Payment Tracking</button>
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-7">
-          <DashboardMetricButton label="Due Today" value={formatCurrency(Number(dashboard.payableToday || 0) + Number(dashboard.receivableToday || 0))} tone="amber" onClick={() => openSettlements("due-today")} />
-          <DashboardMetricButton label="Upcoming Payments" value={formatCurrency(dashboard.payableUpcoming)} tone="coral" onClick={() => openSettlements("upcoming-payments")} />
-          <DashboardMetricButton label="Upcoming Receivables" value={formatCurrency(dashboard.receivableUpcoming)} tone="emerald" onClick={() => openSettlements("upcoming-receivables")} />
-          <DashboardMetricButton label="Overdue Payments" value={formatCurrency(dashboard.payableOverdue)} tone="coral" onClick={() => openSettlements("overdue-payments")} />
-          <DashboardMetricButton label="Overdue Receivables" value={formatCurrency(dashboard.receivableOverdue)} tone="amber" onClick={() => openSettlements("overdue-receivables")} />
-          <DashboardMetricButton label="Partial Settlements" value={String(partialCount)} tone="primary" onClick={() => openSettlements("partial")} />
-          <DashboardMetricButton label={period.startDate || period.endDate ? "Settled In Period" : "Settled This Month"} value={formatCurrency(Number(dashboard.receivedBack || 0) + Number(dashboard.paidBack || 0))} tone="income" onClick={() => openSettlements("settled", "", true)} />
-        </div>
+      <section className="rounded-2xl border border-[#E5EAF0] bg-white p-3.5 shadow-[0_2px_8px_rgba(35,52,77,0.04)] md:col-span-2 xl:col-span-6">
+        <div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-bold">Upcoming Due</h2><p className="mt-0.5 text-[11px] text-muted">Payments and receipts due soon</p></div><button type="button" onClick={() => openSettlements("upcoming")} className="shrink-0 text-xs font-bold text-primary">View All →</button></div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2"><UpcomingDuePanel title="To Pay Due Soon" items={payableDue} direction="PAYABLE" loading={obligations.loading} onOpen={onOpenObligation} /><UpcomingDuePanel title="To Receive Due Soon" items={receivableDue} direction="RECEIVABLE" loading={obligations.loading} onOpen={onOpenObligation} /></div>
       </section>
 
-      <section className="md:col-span-2 xl:col-span-12">
-        <h2 className="mb-3 text-base font-bold">People Summary</h2>
-        <div className="grid gap-3 md:grid-cols-2">
-          <OutstandingPeoplePanel title="You Have to Pay" direction="PAYABLE" items={dashboard.peopleOutstanding} onSelectPerson={onSelectPerson} />
-          <OutstandingPeoplePanel title="You Have to Receive" direction="RECEIVABLE" items={dashboard.peopleOutstanding} onSelectPerson={onSelectPerson} />
-        </div>
-      </section>
+      <RecentTransactionsSection events={recentEvents} loading={activity.loading} onViewAll={() => onNavigateToActivity({ ...(periodFilters || {}), sort: "newest" })} onOpen={openRecentEvent} className="md:col-span-2 xl:col-span-7" />
+
+      <PaymentsReceivablesSection dashboard={dashboard} partialCount={partialCount} settledTotal={dashboard.settledAllTime} onSelect={openSettlements} onViewAll={() => openSettlements("all")} className="md:col-span-2 xl:col-span-5" />
 
       <section className="rounded-[1.25rem] bg-cream p-4 shadow-card md:col-span-2 xl:col-span-7">
         <div className="flex items-center justify-between gap-3">
@@ -1506,6 +1529,18 @@ function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, 
         </div>
       </section>
 
+      <section className="md:col-span-2 xl:col-span-12">
+        <h2 className="mb-3 text-base font-bold">People Summary</h2>
+        <div className="grid gap-3 md:grid-cols-2">
+          <OutstandingPeoplePanel title="You Have to Pay" direction="PAYABLE" items={dashboard.peopleOutstanding} onSelectPerson={onSelectPerson} />
+          <OutstandingPeoplePanel title="You Have to Receive" direction="RECEIVABLE" items={dashboard.peopleOutstanding} onSelectPerson={onSelectPerson} />
+        </div>
+      </section>
+
+      {(selectedEvent || selectedTransaction) && (selectedTransaction
+        ? <TransactionDetailSheet transaction={selectedTransaction} onClose={() => setSelectedTransaction(null)} onSelectPerson={(person) => { setSelectedTransaction(null); onSelectPerson(person); }} onOpenSettlements={(view, source) => { setSelectedTransaction(null); openSettlements(view, source); }} />
+        : <ActivityEventDetail event={selectedEvent} onClose={() => setSelectedEvent(null)} onOpenSource={(event) => { const transaction = event.rootTransaction || event.transaction; if (transaction?._id) { setSelectedEvent(null); api.get("transactions", transaction._id).then((detail) => setSelectedTransaction(detail.transaction || detail)).catch(() => {}); } }} />)}
+
     </ScreenShell>
   );
 }
@@ -1515,42 +1550,43 @@ function readDashboardPeriod() {
   const params = new URLSearchParams(window.location.search);
   const startDate = params.get("startDate") || "";
   const endDate = params.get("endDate") || "";
+  if (params.get("allTime") === "true") return { month: "", year: "", startDate: "", endDate: "", allTime: true };
   return startDate || endDate
-    ? { month: "", year: "", startDate, endDate }
+    ? { month: "", year: "", startDate, endDate, allTime: false }
     : {
       month: params.get("month") || String(now.getMonth() + 1),
       year: params.get("year") || String(now.getFullYear()),
       startDate: "",
-      endDate: ""
+      endDate: "",
+      allTime: false
     };
 }
 
-function DashboardSummaryCard({ title, amount, caption, icon: Icon, tone, featured = false, onClick }) {
+function DashboardSummaryCard({ title, amount, caption, icon: Icon, tone, className = "", onClick }) {
   return (
-    <button type="button" onClick={onClick} className={`min-w-0 rounded-[1.1rem] p-3 text-left shadow-card transition hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary xl:p-4 ${featured ? "col-span-2 bg-primary text-white shadow-soft xl:col-span-1" : "bg-cream"}`}>
-      <div className="flex items-start justify-between gap-2">
+    <button type="button" onClick={onClick} className={`min-w-0 rounded-2xl border border-[#E4EAF0] p-3 text-left shadow-[0_2px_8px_rgba(35,52,77,0.04)] transition hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${tone === "income" ? "bg-[#F0FAF5]" : tone === "coral" ? "bg-[#FFF4F3]" : tone === "emerald" ? "bg-[#F1FAF8]" : "bg-[#F2F7FC]"} ${className}`}>
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className={`grid size-9 shrink-0 place-items-center rounded-full ${formatTone(tone)}`}><Icon size={17} /></span>
         <div className="min-w-0">
-          <p className={`text-xs font-semibold ${featured ? "text-white/75" : "text-muted"}`}>{title}</p>
-          <p className={`mt-1 truncate text-lg font-bold tracking-tight ${featured ? "text-white" : "text-charcoal"}`}>{amount}</p>
-          <p className={`mt-0.5 truncate text-[11px] font-semibold ${featured ? "text-white/70" : "text-muted"}`}>{caption}</p>
+          <p className="truncate text-[11px] font-semibold text-muted">{title}</p>
+          <p className="mt-0.5 truncate text-lg font-bold leading-5 tracking-tight text-charcoal">{amount}</p>
+          <p className="mt-0.5 truncate text-[10px] font-medium text-muted">{caption}</p>
         </div>
-        <span className={`grid size-8 shrink-0 place-items-center rounded-xl ${featured ? "bg-white/15 text-white" : formatTone(tone)}`}>
-          <Icon size={17} />
-        </span>
       </div>
     </button>
   );
 }
 
 function summarizeObligations(items) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
   const open = items.filter((item) => Number(item.remainingAmount || 0) > 0 && !["SETTLED", "CANCELLED"].includes(item.status));
   return {
     toPay: open.filter((item) => item.direction === "PAYABLE").reduce((sum, item) => sum + Number(item.remainingAmount || 0), 0),
     toReceive: open.filter((item) => item.direction === "RECEIVABLE").reduce((sum, item) => sum + Number(item.remainingAmount || 0), 0),
-    partial: open.filter((item) => Number(item.settledAmount || 0) > 0).length,
-    overdue: open.filter((item) => item.status === "OVERDUE" || (item.dueDate && new Date(item.dueDate) < today)).length
+    toPayCount: open.filter((item) => item.direction === "PAYABLE").length,
+    toReceiveCount: open.filter((item) => item.direction === "RECEIVABLE").length,
+    openCount: open.length,
+    partial: open.filter((item) => item.settlementState === "PARTIAL" || Number(item.settledAmount || 0) > 0).length,
+    overdue: open.filter((item) => item.dateState === "OVERDUE").length
   };
 }
 
@@ -1722,18 +1758,21 @@ function SettlementTrackingCard({ summary, onClick }) {
 
 function DashboardPeriodFilter({ period, onApply }) {
   const now = new Date();
-  const defaultPeriod = { month: String(now.getMonth() + 1), year: String(now.getFullYear()), startDate: "", endDate: "" };
+  const defaultPeriod = { month: String(now.getMonth() + 1), year: String(now.getFullYear()), startDate: "", endDate: "", allTime: false };
   const [draft, setDraft] = useState(period);
   const [open, setOpen] = useState(false);
   const triggerRef = useRef(null);
   useEffect(() => setDraft(period), [period]);
   const chips = [
+    !period.allTime &&
     period.startDate && { key: "startDate", label: `From ${formatShortDate(period.startDate)}` },
+    !period.allTime &&
     period.endDate && { key: "endDate", label: `To ${formatShortDate(period.endDate)}` },
-    !period.startDate && !period.endDate && period.month !== defaultPeriod.month && { key: "month", label: monthOptions.find((item) => item.value === period.month)?.label || "Month" },
-    !period.startDate && !period.endDate && period.year !== defaultPeriod.year && { key: "year", label: period.year }
+    !period.allTime && !period.startDate && !period.endDate && period.month !== defaultPeriod.month && { key: "month", label: monthOptions.find((item) => item.value === period.month)?.label || "Month" },
+    !period.allTime && !period.startDate && !period.endDate && period.year !== defaultPeriod.year && period.year && { key: "year", label: period.year }
   ].filter(Boolean);
-  const reset = () => setDraft(defaultPeriod);
+  const allTimePeriod = { month: "", year: "", startDate: "", endDate: "", allTime: true };
+  const reset = () => setDraft(allTimePeriod);
   const removeChip = (chip) => {
     const next = chip.key === "startDate" || chip.key === "endDate"
       ? { ...period, [chip.key]: "" }
@@ -1750,13 +1789,25 @@ function DashboardPeriodFilter({ period, onApply }) {
       <FilterButton refProp={triggerRef} active={open} count={chips.length} onClick={() => { setDraft(period); setOpen((current) => !current); }}>
         <SlidersHorizontal size={16} /> Filter
       </FilterButton>
-      <ActiveFilterChips chips={chips} onRemove={removeChip} onClear={() => { onApply(defaultPeriod); setDraft(defaultPeriod); }} />
+      <ActiveFilterChips chips={chips} onRemove={removeChip} onClear={() => { onApply(allTimePeriod); setDraft(allTimePeriod); }} />
       <CompactPopover open={open} title="Date Filters" triggerRef={triggerRef} onClose={() => setOpen(false)} footer={<FilterActions onReset={reset} onApply={() => { onApply(draft); setOpen(false); }} />}>
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" onClick={() => setDraft(defaultPeriod)} className="rounded-2xl bg-paper px-3 py-2 text-sm font-bold text-charcoal">This Month</button>
+          <button type="button" onClick={() => setDraft(allTimePeriod)} className="rounded-2xl bg-paper px-3 py-2 text-sm font-bold text-charcoal">All Time</button>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {[["today", "Today"], ["this_week", "This Week"], ["last_month", "Last Month"]].map(([periodKey, label]) => (
+            <button key={periodKey} type="button" onClick={() => {
+              const range = activityPeriodRange(periodKey);
+              setDraft({ ...allTimePeriod, allTime: false, ...range });
+            }} className="rounded-2xl bg-paper px-3 py-2 text-sm font-bold text-charcoal">{label}</button>
+          ))}
+        </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <FilterSelect label="Month" value={draft.month} onChange={(value) => setDraft({ ...draft, month: value || defaultPeriod.month, startDate: "", endDate: "" })} options={monthOptions} />
-          <FilterSelect label="Year" value={draft.year} onChange={(value) => setDraft({ ...draft, year: value || defaultPeriod.year, startDate: "", endDate: "" })} options={yearFilterOptions().filter((item) => item.value)} />
-          <FormInput label="From Date" type="date" value={draft.startDate || ""} onChange={(value) => setDraft({ ...draft, month: "", year: "", startDate: value })} />
-          <FormInput label="To Date" type="date" value={draft.endDate || ""} onChange={(value) => setDraft({ ...draft, month: "", year: "", endDate: value })} />
+          <FilterSelect label="Month" value={draft.month} onChange={(value) => setDraft({ ...draft, allTime: false, month: value || defaultPeriod.month, startDate: "", endDate: "" })} options={monthOptions} />
+          <FilterSelect label="Year" value={draft.year} onChange={(value) => setDraft({ ...draft, allTime: false, year: value || defaultPeriod.year, startDate: "", endDate: "" })} options={yearFilterOptions().filter((item) => item.value)} />
+          <FormInput label="From Date" type="date" value={draft.startDate || ""} onChange={(value) => setDraft({ ...draft, allTime: false, month: "", year: "", startDate: value })} />
+          <FormInput label="To Date" type="date" value={draft.endDate || ""} onChange={(value) => setDraft({ ...draft, allTime: false, month: "", year: "", endDate: value })} />
         </div>
       </CompactPopover>
     </div>
@@ -1786,26 +1837,89 @@ function AccountBalanceList({ accounts, total, onSelect }) {
   );
 }
 
-function MoneyWithPeople({ dashboard, onSelect }) {
+function MoneyWithPeople({ dashboard, obligations = [], onSelect, onViewAll, className = "" }) {
+  const peopleCount = (sources) => new Set(obligations
+    .filter((item) => sources.includes(item.sourceType) && Number(item.remainingAmount || 0) > 0 && item.person?._id)
+    .map((item) => String(item.person._id))).size;
   const items = [
-    { label: "Borrowed Outstanding", value: dashboard.borrowedOutstanding, view: "to-pay", source: "BORROW", tone: "amber" },
-    { label: "Lent Outstanding", value: dashboard.lentOutstanding, view: "to-receive", source: "LEND", tone: "emerald" },
-    { label: "Paid for Someone Outstanding", value: dashboard.paidForSomeoneOutstanding, view: "to-receive", source: "PAID_FOR_SOMEONE_AND_SPLIT", tone: "emerald" },
-    { label: "Someone Paid for Me Outstanding", value: dashboard.someonePaidForMeOutstanding, view: "to-pay", source: "PAID_BY_SOMEONE", tone: "coral" }
+    { label: "Lent Outstanding", value: dashboard.lentOutstanding, count: peopleCount(["LEND"]), view: "to-receive", source: "LEND", tone: "emerald", icon: ArrowUpRight },
+    { label: "Paid for Someone", value: dashboard.paidForSomeoneOutstanding, count: peopleCount(["PAID_FOR_SOMEONE", "SPLIT_SHARE"]), view: "to-receive", source: "PAID_FOR_SOMEONE_AND_SPLIT", tone: "primary", icon: HandCoins },
+    { label: "Borrowed", value: dashboard.borrowedOutstanding, count: peopleCount(["BORROW"]), view: "to-pay", source: "BORROW", tone: "amber", icon: ArrowDownLeft },
+    { label: "Someone Paid for Me", value: dashboard.someonePaidForMeOutstanding, count: peopleCount(["PAID_BY_SOMEONE"]), view: "to-pay", source: "PAID_BY_SOMEONE", tone: "coral", icon: Receipt }
   ];
   return (
-    <section className="rounded-[1.25rem] bg-cream p-4 shadow-card md:col-span-2 xl:col-span-12">
-      <h2 className="text-base font-bold">Money with People</h2>
-      <div className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-4">
+    <section className={`money-with-people-section w-full rounded-2xl border border-[#E5EAF0] bg-white shadow-[0_2px_8px_rgba(35,52,77,0.04)] ${className}`}>
+      <div className="money-with-people-header flex flex-wrap items-start justify-between gap-x-3 gap-y-2"><div className="min-w-0"><h2 className="text-base font-bold sm:text-lg">Money with People</h2><p className="mt-0.5 text-xs text-muted">Your settlements overview</p></div><button type="button" onClick={onViewAll} className="shrink-0 text-xs font-bold text-primary">View All →</button></div>
+      <div className="money-with-people-grid mt-3 grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-4">
         {items.map((item) => (
-          <button key={item.label} type="button" onClick={() => onSelect(item.view, item.source)} className={`min-w-0 rounded-2xl p-3 text-left ${formatTone(item.tone)}`}>
-            <p className="text-xs font-semibold leading-4 opacity-80">{item.label}</p>
-            <p className="mt-1 truncate text-base font-bold text-charcoal">{formatCurrency(item.value || 0)}</p>
+          <button key={item.label} type="button" onClick={() => onSelect(item.view, item.source)} className={`money-with-people-card min-w-0 rounded-xl border border-white/80 p-3 text-left transition hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary lg:p-3 xl:p-3.5 ${item.tone === "amber" ? "bg-[#FFF8E8]" : item.tone === "coral" ? "bg-[#FFF2F0]" : item.tone === "primary" ? "bg-[#F5F2FF]" : "bg-[#EFF9F5]"}`}>
+            <span className={`grid size-8 place-items-center rounded-full sm:size-9 ${formatTone(item.tone)}`}><item.icon size={16} /></span>
+            <p className="mt-2 min-h-[2.5em] max-w-[15ch] text-[13px] font-semibold leading-[1.25] text-muted">{item.label}</p>
+            <p className="mt-1 truncate text-base font-bold text-charcoal sm:text-[17px]">{formatCurrency(item.value || 0)}</p>
+            <p className="mt-1 text-xs font-medium text-muted">{item.count} {item.count === 1 ? "person" : "people"}</p>
           </button>
         ))}
       </div>
     </section>
   );
+}
+
+function UpcomingDuePanel({ title, items, direction, loading, onOpen }) {
+  const payable = direction === "PAYABLE";
+  return <div className={`min-w-0 rounded-xl ${payable ? "bg-[#FFF8F6]" : "bg-[#F3FAF7]"}`}>
+    <div className={`flex items-center justify-between rounded-t-xl px-2.5 py-2 ${payable ? "bg-[#FFF0ED]" : "bg-[#EAF7F0]"}`}><h3 className="truncate text-[10px] font-bold">{title}</h3><span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold text-muted">{items.length}</span></div>
+    <div className="divide-y divide-charcoal/5 px-2.5">
+      {loading && <div className="py-3 text-[11px] text-muted">Loading records…</div>}
+      {!loading && !items.length && <p className="py-3 text-[11px] text-muted">No upcoming {payable ? "payments" : "receivables"}.</p>}
+      {!loading && items.map((item) => <button key={item._id} type="button" onClick={() => onOpen(item._id)} className="flex w-full min-w-0 items-center gap-2 py-2 text-left">
+        <span className={`grid size-7 shrink-0 place-items-center rounded-full text-[9px] font-bold ${payable ? "bg-coralSoft text-coral" : "bg-emeraldSoft text-emerald"}`}>{String(item.person?.name || "?").split(/\s+/).map((word) => word[0]).slice(0, 2).join("").toUpperCase()}</span>
+        <span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-bold">{item.person?.name || "Unknown person"}</span><span className="block truncate text-[10px] text-muted">{obligationDescription(item)}</span></span>
+        <span className="shrink-0 text-right"><span className={`block text-[11px] font-bold ${payable ? "text-coral" : "text-emerald"}`}>{formatCurrency(item.remainingAmount)}</span><span className="block text-[9px] text-muted">{formatShortDate(item.dueDate)}</span></span>
+      </button>)}
+    </div>
+  </div>;
+}
+
+function RecentTransactionsSection({ events, loading, onViewAll, onOpen, className = "" }) {
+  const rawType = (event) => event.metadata?.transactionType || event.obligation?.sourceType || "";
+  const typeLabel = (event) => {
+    const kind = rawType(event);
+    return ({ EXPENSE: "Expense", INCOME: "Income", BORROW: "Borrow", LEND: "Lend", TRANSFER: "Transfer", PAID_FOR_SOMEONE: "Paid for Someone", PAID_BY_SOMEONE: "Someone Paid for Me" })[kind] || (event.eventType?.startsWith("SETTLEMENT") ? "Settlement" : activityEventLabel(event));
+  };
+  const amountText = (event) => `${event.direction === "IN" ? "+" : event.direction === "OUT" ? "−" : ""}${formatCurrency(event.amount)}`;
+  const semanticTone = (event) => event.eventType?.startsWith("SETTLEMENT") ? "purple" : rawType(event) === "TRANSFER" ? "blue" : rawType(event) === "BORROW" ? "amber" : rawType(event) === "LEND" ? "teal" : event.direction === "IN" ? "green" : event.direction === "OUT" ? "red" : "blue";
+  const amountTone = (event) => ({ purple: "text-primary", blue: "text-blue-700", amber: "text-amber", teal: "text-teal-700", green: "text-emerald", red: "text-coral" })[semanticTone(event)];
+  const pillTone = (event) => ({ purple: "bg-violetSoft text-primary", blue: "bg-blue-50 text-blue-700", amber: "bg-amberSoft text-amber", teal: "bg-teal-50 text-teal-700", green: "bg-emeraldSoft text-emerald", red: "bg-coralSoft text-coral" })[semanticTone(event)];
+  const renderEvent = (event) => <button key={event._id} type="button" onClick={() => onOpen(event)} className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 border-b border-[#E8EDF2] px-3 py-2.5 text-left last:border-0 hover:bg-paper/70 md:grid-cols-[minmax(0,1.3fr)_6.5rem_6rem_5.5rem_6.5rem]">
+    <span className="min-w-0"><span className="block truncate text-xs font-bold">{activityEventTitle(event)}</span><span className="block truncate text-[10px] text-muted md:hidden">{typeLabel(event)} · {formatShortDate(event.occurredAt)}</span><span className="hidden truncate text-[10px] text-muted md:block">{activityEventSubtitle(event)}</span></span>
+    <span className={`text-right text-xs font-bold ${amountTone(event)}`}>{amountText(event)}</span>
+    <span className="hidden truncate text-[10px] text-muted md:block">{event.account?.name || "—"}</span><span className="hidden text-[10px] text-muted md:block">{formatShortDate(event.occurredAt)}</span>
+    <span className={`hidden w-fit rounded-full px-2 py-1 text-[9px] font-bold md:inline-block ${pillTone(event)}`}>{typeLabel(event)}</span>
+  </button>;
+  return <section className={`overflow-hidden rounded-2xl border border-[#E5EAF0] bg-white shadow-[0_2px_8px_rgba(35,52,77,0.04)] ${className}`}>
+    <div className="flex items-start justify-between gap-3 p-3.5"><div><h2 className="text-sm font-bold">Recent Transactions</h2><p className="mt-0.5 text-[11px] text-muted">Your latest activity across all accounts</p></div><button type="button" onClick={onViewAll} className="shrink-0 text-xs font-bold text-primary">View All →</button></div>
+    <div className="hidden grid-cols-[minmax(0,1.3fr)_6.5rem_6rem_5.5rem_6.5rem] gap-3 border-y border-[#E8EDF2] bg-[#F8FAFC] px-3 py-2 text-[9px] font-bold uppercase tracking-wide text-muted md:grid"><span>Description</span><span className="text-right">Amount</span><span>Account</span><span>Date</span><span>Type</span></div>
+    {loading && <div className="px-3 py-4 text-xs text-muted">Loading recent activity…</div>}
+    {!loading && !events.length && <div className="px-3 py-4 text-xs text-muted">No recent transactions.</div>}
+    {!loading && events.map(renderEvent)}
+  </section>;
+}
+
+function PaymentsReceivablesSection({ dashboard, partialCount, settledTotal, onSelect, onViewAll, className = "" }) {
+  const metrics = [
+    { label: "To Pay Today", value: dashboard.payableToday, tone: "amber", view: "to-pay", direction: "PAYABLE", dateState: "TODAY" },
+    { label: "To Receive Today", value: dashboard.receivableToday, tone: "income", view: "to-receive", direction: "RECEIVABLE", dateState: "TODAY" },
+    { label: "Upcoming Payments", value: dashboard.payableUpcoming, tone: "coral", view: "upcoming-payments", direction: "PAYABLE", dateState: "UPCOMING" },
+    { label: "Upcoming Receivables", value: dashboard.receivableUpcoming, tone: "emerald", view: "upcoming-receivables", direction: "RECEIVABLE", dateState: "UPCOMING" },
+    { label: "Overdue Payments", value: dashboard.payableOverdue, tone: "coral", view: "overdue-payments", direction: "PAYABLE", dateState: "OVERDUE" },
+    { label: "Overdue Receivables", value: dashboard.receivableOverdue, tone: "amber", view: "overdue-receivables", direction: "RECEIVABLE", dateState: "OVERDUE" },
+    { label: "Partial Settlements", value: partialCount, tone: "primary", view: "partial", status: "PARTIAL" }
+  ];
+  return <section className={`rounded-2xl border border-[#E5EAF0] bg-white p-3.5 shadow-[0_2px_8px_rgba(35,52,77,0.04)] ${className}`}>
+    <div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-bold">Payments &amp; Receivables</h2><p className="mt-0.5 text-[11px] text-muted">Track pending and completed payments</p></div><button type="button" onClick={onViewAll} className="shrink-0 text-right text-[10px] font-bold text-primary">View Payment Tracking →</button></div>
+    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">{metrics.map((metric) => <DashboardMetricButton key={metric.label} label={metric.label} value={metric.label === "Partial Settlements" ? String(metric.value || 0) : formatCurrency(metric.value || 0)} tone={metric.tone} onClick={() => onSelect(metric.view, "", false, { ...(metric.direction ? { direction: metric.direction } : {}), ...(metric.dateState ? { dateState: metric.dateState } : {}), ...(metric.status ? { status: metric.status } : {}) })} />)}</div>
+    <button type="button" onClick={() => onSelect("settled", "", false, { allTime: "true" })} className="mt-2 flex w-full items-center justify-between gap-3 rounded-xl bg-[#F3F0FF] px-3 py-2 text-left"><span className="text-[11px] font-semibold text-muted">Settled In All Time</span><span className="text-sm font-bold text-charcoal">{formatCurrency(settledTotal || 0)}</span></button>
+  </section>;
 }
 
 function DashboardMetricButton({ label, value, tone, onClick }) {
@@ -1900,20 +2014,14 @@ function peopleBreakdownLabel(sourceType, direction) {
 }
 
 function personDueLabels(obligations = []) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
   const labels = new Set();
   obligations.forEach((item) => {
     if (!item.dueDate || Number(item.remainingAmount || 0) <= 0) return;
-    const due = new Date(item.dueDate);
-    due.setHours(0, 0, 0, 0);
-    if (due < today) labels.add("Overdue");
-    else if (due.getTime() === today.getTime()) labels.add("Due Today");
-    else if (due.getTime() === tomorrow.getTime()) labels.add("Due Tomorrow");
+    if (item.dateState === "OVERDUE") labels.add("Overdue");
+    else if (item.dateState === "TODAY") labels.add("Due Today");
+    else if (item.dateState === "UPCOMING") labels.add("Upcoming");
   });
-  return ["Overdue", "Due Today", "Due Tomorrow"].filter((label) => labels.has(label));
+  return ["Overdue", "Due Today", "Upcoming"].filter((label) => labels.has(label));
 }
 
 function SkeletonBlock({ className = "" }) {
@@ -1935,31 +2043,29 @@ function HomeSkeleton({ user, onLogout, onThemeChange, onNavigate }) {
     <>
       <ScreenShell className="space-y-4 md:hidden">
         <PremiumHeader user={user} onLogout={onLogout} onThemeChange={onThemeChange} onNavigate={onNavigate} locationKey="home-skeleton" />
-        <div className="grid grid-cols-2 gap-3">
-          <SkeletonCard className="col-span-2" />
-          <SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard />
+        <div className="grid grid-cols-2 gap-2.5">
+          <SkeletonCard className="col-span-2 h-24" />
+          <SkeletonCard className="h-24" /><SkeletonCard className="h-24" /><SkeletonCard className="h-24" /><SkeletonCard className="h-24" />
         </div>
-        <SkeletonCard className="h-40" />
-        <SkeletonCard className="h-36" />
-        <SkeletonCard className="h-36" />
+        <SkeletonCard className="h-48" />
+        <SkeletonCard className="h-56" />
+        <SkeletonCard className="h-64" />
+        <SkeletonCard className="h-56" />
         <div className="space-y-3">
           <SkeletonBlock className="h-4 w-32" />
           <SkeletonRow />
           <SkeletonRow />
         </div>
       </ScreenShell>
-      <ScreenShell className="hidden md:grid md:grid-cols-2 md:gap-5 xl:grid-cols-12 xl:gap-5">
+      <ScreenShell className="hidden md:grid md:grid-cols-2 md:gap-3 xl:grid-cols-12 xl:gap-4">
         <SkeletonCard className="h-24 md:col-span-2 xl:col-span-12" />
-        <div className="grid grid-cols-2 gap-3 md:col-span-2 xl:col-span-12 xl:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2.5 md:col-span-2 xl:col-span-12 xl:grid-cols-5">
           <SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard />
         </div>
-        <SkeletonCard className="h-40 md:col-span-2 xl:col-span-12" />
-        <SkeletonCard className="h-36" />
-        <SkeletonCard className="h-36" />
-        <SkeletonCard className="h-52 md:col-span-2 xl:col-span-8" />
-        <SkeletonCard className="h-52 md:col-span-2 xl:col-span-4" />
-        <SkeletonCard className="h-64 md:col-span-2 xl:col-span-8" />
-        <SkeletonCard className="h-64 md:col-span-2 xl:col-span-4" />
+        <SkeletonCard className="h-48 md:col-span-2 xl:col-span-6" />
+        <SkeletonCard className="h-48 md:col-span-2 xl:col-span-6" />
+        <SkeletonCard className="h-64 md:col-span-2 xl:col-span-7" />
+        <SkeletonCard className="h-64 md:col-span-2 xl:col-span-5" />
       </ScreenShell>
     </>
   );
@@ -2450,7 +2556,7 @@ function ActivityScreen({ refreshKey, showToast, onSelectPerson, onOpenSettlemen
 
   return (
     <ScreenShell className="space-y-5">
-      <PageHeader icon={Activity} title="Activity" subtitle="Clean financial history" />
+      <PageHeader className="md:hidden" icon={Activity} title="Activity" subtitle="Clean financial history" />
       <section className="relative space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex gap-2">
@@ -3769,23 +3875,22 @@ function SettlementCenter({ refreshKey, onSettled, onOpenObligation }) {
   const now = new Date();
   const currentMonth = String(now.getMonth() + 1);
   const currentYear = String(now.getFullYear());
-  const emptyFilters = { person: "", direction: "", status: "", source: "", account: "", category: "", tag: "", month: currentMonth, year: currentYear, startDate: "", endDate: "", allTime: "" };
+  const emptyFilters = { person: "", direction: "", status: "", dateState: "", source: "", account: "", category: "", tag: "", month: "", year: "", startDate: "", endDate: "", allTime: "" };
   const settlementRoute = new URLSearchParams(window.location.search);
   const initialView = settlementRoute.get("view") || "all";
-  const routeMonth = settlementRoute.get("month") || currentMonth;
-  const routeYear = settlementRoute.get("year") || currentYear;
-  const routeStartDate = settlementRoute.get("startDate") || (routeMonth && routeYear ? `${routeYear}-${String(routeMonth).padStart(2, "0")}-01` : "");
-  const routeEndDate = settlementRoute.get("endDate") || (routeMonth && routeYear
-    ? `${routeYear}-${String(routeMonth).padStart(2, "0")}-${String(new Date(Number(routeYear), Number(routeMonth), 0).getDate()).padStart(2, "0")}`
-    : "");
+  const routeMonth = settlementRoute.get("month") || "";
+  const routeYear = settlementRoute.get("year") || "";
   const initialTab = ({
     "to-pay": "To Pay",
     "to-receive": "To Receive",
     "due-today": "Due Today",
     "upcoming-payments": "Upcoming",
     "upcoming-receivables": "Upcoming",
+    upcoming: "Upcoming",
+    overdue: "Overdue",
     "overdue-payments": "Overdue",
     "overdue-receivables": "Overdue",
+    open: "Open",
     partial: "Partial",
     settled: "Settled",
     expenses: "Expenses"
@@ -3793,21 +3898,75 @@ function SettlementCenter({ refreshKey, onSettled, onOpenObligation }) {
   const [tab, setTab] = useState(initialTab);
   const [filters, setFilters] = useState(() => ({
     ...emptyFilters,
+    person: settlementRoute.get("person") || "",
     direction: settlementRoute.get("direction") || ({ "upcoming-payments": "PAYABLE", "upcoming-receivables": "RECEIVABLE", "overdue-payments": "PAYABLE", "overdue-receivables": "RECEIVABLE" })[initialView] || "",
-    status: initialView === "partial" ? "PARTIAL" : "",
+    status: settlementRoute.get("status") || (initialView === "partial" ? "PARTIAL" : ""),
+    dateState: settlementRoute.get("dateState") || "",
     source: settlementRoute.get("source") || "",
+    account: settlementRoute.get("account") || "",
+    category: settlementRoute.get("category") || "",
+    tag: settlementRoute.get("tag") || "",
     month: settlementRoute.get("allTime") === "true" ? "" : routeMonth,
     year: settlementRoute.get("allTime") === "true" ? "" : routeYear,
-    startDate: settlementRoute.get("startDate") ? routeStartDate : "",
-    endDate: settlementRoute.get("endDate") ? routeEndDate : "",
+    startDate: settlementRoute.get("startDate") || "",
+    endDate: settlementRoute.get("endDate") || "",
     allTime: settlementRoute.get("allTime") === "true" ? "true" : ""
   }));
   const [draftFilters, setDraftFilters] = useState(emptyFilters);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [searchText, setSearchText] = useState("");
+  const [settlementSort, setSettlementSort] = useState("latest");
   const filterButtonRef = useRef(null);
   const [selected, setSelected] = useState(null);
   const [settleOpen, setSettleOpen] = useState(false);
-  const tabs = ["All", "To Pay", "To Receive", "Due Today", "Upcoming", "Overdue", "Partial", "Settled", "Expenses"];
+  const tabs = ["All", "To Pay", "To Receive", "Open", "Partial", "Settled", "Expenses", "Overdue", "Upcoming", "Due Today"];
+  const viewByTab = { "To Pay": "to-pay", "To Receive": "to-receive", Open: "open", Partial: "partial", Settled: "settled", Expenses: "expenses", Overdue: "overdue", Upcoming: "upcoming", "Due Today": "due-today" };
+  useEffect(() => {
+    if (window.location.pathname !== "/settlements") return;
+    const params = new URLSearchParams();
+    const view = viewByTab[tab];
+    if (view) params.set("view", view);
+    ["person", "direction", "status", "dateState", "source", "account", "category", "tag", "month", "year", "startDate", "endDate", "allTime"].forEach((key) => {
+      if (filters[key]) params.set(key, filters[key]);
+    });
+    const queryString = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`);
+  }, [filters, tab]);
+  const selectTab = (nextTab) => {
+    if (nextTab === tab) return;
+    const params = new URLSearchParams(window.location.search);
+    const view = viewByTab[nextTab];
+    if (view) params.set("view", view);
+    else params.delete("view");
+    const queryString = params.toString();
+    window.history.pushState({}, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`);
+    setTab(nextTab);
+  };
+  useEffect(() => {
+    const viewToTab = { "to-pay": "To Pay", "to-receive": "To Receive", open: "Open", partial: "Partial", settled: "Settled", expenses: "Expenses", overdue: "Overdue", "overdue-payments": "Overdue", "overdue-receivables": "Overdue", upcoming: "Upcoming", "upcoming-payments": "Upcoming", "upcoming-receivables": "Upcoming", "due-today": "Due Today" };
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      setTab(viewToTab[params.get("view")] || "All");
+      setFilters((current) => ({
+        ...current,
+        person: params.get("person") || "",
+        direction: params.get("direction") || "",
+        status: params.get("status") || "",
+        dateState: params.get("dateState") || "",
+        source: params.get("source") || "",
+        account: params.get("account") || "",
+        category: params.get("category") || "",
+        tag: params.get("tag") || "",
+        month: params.get("allTime") === "true" ? "" : params.get("month") || "",
+        year: params.get("allTime") === "true" ? "" : params.get("year") || "",
+        startDate: params.get("startDate") || "",
+        endDate: params.get("endDate") || "",
+        allTime: params.get("allTime") === "true" ? "true" : ""
+      }));
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
   const expenseQuery = useMemo(() => {
     const query = { type: "EXPENSE", sort: "newest", status: "ACTIVE" };
     const dateRange = settlementFilterDateRange(filters);
@@ -3819,22 +3978,23 @@ function SettlementCenter({ refreshKey, onSettled, onOpenObligation }) {
     return query;
   }, [filters]);
   const expenseResource = useResource("transactions", expenseQuery, refreshKey);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const filtered = resource.items.filter((item) => {
+  const filteredByFilters = resource.items.filter((item) => {
     const remaining = Number(item.remainingAmount || 0);
-    const isPartial = Number(item.settledAmount || 0) > 0 && remaining > 0;
+    const isPartial = item.settlementState === "PARTIAL" || (Number(item.settledAmount || 0) > 0 && remaining > 0);
     const isOpen = remaining > 0 && !["SETTLED", "CANCELLED"].includes(item.status);
-    const due = item.dueDate ? new Date(item.dueDate) : null;
+    const dateState = item.dateState || "NO_DATE";
     if (item.status === "CANCELLED") return false;
     if (filters.person && String(item.person?._id) !== filters.person) return false;
     if (filters.direction && item.direction !== filters.direction) return false;
     if (filters.status === "PENDING" && (!isOpen || isPartial)) return false;
     if (filters.status === "PARTIAL" && !isPartial) return false;
-    if (filters.status === "SETTLED" && item.status !== "SETTLED" && remaining > 0) return false;
-    if (filters.status === "OVERDUE" && !(item.status === "OVERDUE" || (due && due < today))) return false;
+    if (filters.status === "SETTLED" && (item.status === "CANCELLED" || (item.status !== "SETTLED" && remaining > 0))) return false;
+    if (filters.status === "OVERDUE" && (!isOpen || dateState !== "OVERDUE")) return false;
+    if (filters.status === "PARTIAL" && !isPartial) return false;
+    if (filters.dateState === "PARTIAL" && !isPartial) return false;
+    if (filters.dateState === "SETTLED" && item.settlementState !== "SETTLED") return false;
+    if (filters.dateState && !["PARTIAL", "SETTLED"].includes(filters.dateState) && dateState !== filters.dateState) return false;
+    if (["TODAY", "UPCOMING", "OVERDUE", "NO_DATE"].includes(filters.dateState) && !isOpen) return false;
     if (filters.account && String(item.sourceTransaction?.account?._id || item.sourceTransaction?.account) !== filters.account) return false;
     if (filters.category && String(item.sourceTransaction?.category?._id || item.sourceTransaction?.category) !== filters.category) return false;
     if (filters.tag && !(item.sourceTransaction?.tags || []).some((tag) => String(tag?._id || tag) === filters.tag)) return false;
@@ -3848,61 +4008,113 @@ function SettlementCenter({ refreshKey, onSettled, onOpenObligation }) {
     if (dateRange.endDate && filterDate > new Date(`${dateRange.endDate}T23:59:59.999`)) return false;
     if (tab === "To Pay") return isOpen && item.direction === "PAYABLE";
     if (tab === "To Receive") return isOpen && item.direction === "RECEIVABLE";
-    if (tab === "Due Today") return isOpen && due && due >= today && due < tomorrow;
-    if (tab === "Upcoming") return isOpen && due && due >= tomorrow;
-    if (tab === "Overdue") return isOpen && (item.status === "OVERDUE" || (due && due < today));
+    if (tab === "Open") return isOpen;
+    if (tab === "Due Today") return isOpen && dateState === "TODAY";
+    if (tab === "Upcoming") return isOpen && dateState === "UPCOMING";
+    if (tab === "Overdue") return isOpen && dateState === "OVERDUE";
     if (tab === "Partial") return isPartial;
-    if (tab === "Settled") return item.status === "SETTLED" || remaining <= 0;
+    if (tab === "Settled") return item.status !== "CANCELLED" && (item.status === "SETTLED" || remaining <= 0);
     return true;
   });
+  const normalizedSearch = searchText.trim().toLocaleLowerCase();
+  const filtered = filteredByFilters
+    .filter((item) => !normalizedSearch || [item.person?.name, sourceTypeLabel(item.sourceType), item.sourceTransaction?.note]
+      .some((value) => String(value || "").toLocaleLowerCase().includes(normalizedSearch)))
+    .sort((left, right) => {
+      const difference = new Date(left.createdAt || 0) - new Date(right.createdAt || 0);
+      return settlementSort === "oldest" ? difference : -difference;
+    });
+  const filteredExpenses = expenseResource.items
+    .filter((item) => !normalizedSearch || [item.note, item.category?.name, item.account?.name]
+      .some((value) => String(value || "").toLocaleLowerCase().includes(normalizedSearch)))
+    .sort((left, right) => {
+      const difference = new Date(left.transactionDate || left.createdAt || 0) - new Date(right.transactionDate || right.createdAt || 0);
+      return settlementSort === "oldest" ? difference : -difference;
+    });
   const sourceFilterOptions = [...new Set(resource.items.map((item) => item.sourceType).filter(Boolean))];
   const filterChips = [
+    searchText && { key: "_search", label: `Search: ${searchText}` },
     filters.person && { key: "person", label: people.items.find((item) => item._id === filters.person)?.name || "Person" },
     filters.direction && { key: "direction", label: filters.direction === "PAYABLE" ? "To Pay" : "To Receive" },
     filters.status && { key: "status", label: { PENDING: "Pending", PARTIAL: "Partial", SETTLED: "Settled", OVERDUE: "Overdue" }[filters.status] },
+    filters.dateState && { key: "dateState", label: ({ TODAY: "Due Today", UPCOMING: "Upcoming", OVERDUE: "Overdue", NO_DATE: "No Due Date", PARTIAL: "Partial", SETTLED: "Settled" })[filters.dateState] || filters.dateState },
     filters.source && { key: "source", label: filters.source === "PAID_FOR_SOMEONE_AND_SPLIT" ? "Paid for Someone" : sourceTypeLabel(filters.source) },
     filters.account && { key: "account", label: accounts.items.find((item) => item._id === filters.account)?.name || "Account" },
     filters.category && { key: "category", label: categories.items.find((item) => item._id === filters.category)?.name || "Category" },
     filters.tag && { key: "tag", label: tags.items.find((item) => item._id === filters.tag)?.name || "Tag" },
-    filters.allTime && { key: "allTime", label: "All Time" },
     !filters.allTime && !filters.startDate && !filters.endDate && filters.month && { key: "month", label: monthOptions.find((item) => item.value === filters.month)?.label || "Month" },
     !filters.allTime && !filters.startDate && !filters.endDate && filters.year && { key: "year", label: filters.year },
     filters.startDate && { key: "startDate", label: `From ${formatShortDate(filters.startDate)}` },
     filters.endDate && { key: "endDate", label: `To ${formatShortDate(filters.endDate)}` }
   ].filter(Boolean);
-  const clearFilters = () => { setFilters(emptyFilters); setDraftFilters(emptyFilters); };
+  const clearFilters = () => { setFilters(emptyFilters); setDraftFilters(emptyFilters); setTab("All"); setSearchText(""); setSettlementSort("latest"); };
+  const summary = summarizeObligations(resource.items);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const settledThisMonth = resource.items.filter((item) => {
+    const date = item.settledAt ? new Date(item.settledAt) : null;
+    return item.status === "SETTLED" && date && date >= monthStart && date < nextMonthStart;
+  });
+  const settledThisMonthTotal = settledThisMonth.reduce((total, item) => total + Number(item.settledAmount || item.originalAmount || 0), 0);
   const removeFilter = (chip) => {
+    if (chip.key === "_search") {
+      setSearchText("");
+      return;
+    }
     const next = chip.key === "month" || chip.key === "year"
       ? { ...filters, month: "", year: "", allTime: "true", startDate: "", endDate: "" }
       : chip.key === "allTime"
-        ? { ...filters, allTime: "", month: currentMonth, year: currentYear }
+        ? { ...filters, allTime: "", month: "", year: "", startDate: "", endDate: "" }
         : { ...filters, [chip.key]: "" };
     setFilters(next);
     setDraftFilters(next);
   };
 
   return (
-    <ScreenShell className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold text-charcoal">Payment Tracking</h1>
-        <p className="mt-1 text-sm font-semibold text-muted">Each payment stays linked to the original record.</p>
+    <ScreenShell className="space-y-3">
+      <div className="md:hidden">
+        <h1 className="text-2xl font-bold tracking-tight text-charcoal">Settlements</h1>
+        <p className="mt-0.5 text-xs font-medium text-muted">Track what you need to pay and receive</p>
       </div>
-      <SettlementTrackingCard summary={summarizeObligations(resource.items)} onClick={() => setTab("All")} />
-      <section className="rounded-3xl bg-cream p-4 shadow-card">
-        <div className="no-scrollbar flex gap-2 overflow-x-auto">
-          {tabs.map((item) => <button key={item} onClick={() => setTab(item)} className={`shrink-0 rounded-full px-4 py-2 text-xs font-bold ${tab === item ? "bg-primary text-white" : "bg-paper text-muted"}`}>{item}</button>)}
-        </div>
+      <section className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+        {[
+          { label: "Total To Pay", value: formatCurrency(summary.toPay), detail: `Across ${summary.toPayCount} ${summary.toPayCount === 1 ? "item" : "items"}`, icon: ArrowUpRight, style: "border-rose-100 bg-rose-50/80", iconStyle: "bg-rose-100 text-rose-600" },
+          { label: "Total To Receive", value: formatCurrency(summary.toReceive), detail: `Across ${summary.toReceiveCount} ${summary.toReceiveCount === 1 ? "item" : "items"}`, icon: ArrowDownLeft, style: "border-emerald-100 bg-emerald-50/80", iconStyle: "bg-emerald-100 text-emerald-600" },
+          { label: "Open Items", value: String(summary.openCount), detail: "Need attention", icon: Receipt, style: "border-sky-100 bg-sky-50/80", iconStyle: "bg-sky-100 text-sky-600" },
+          { label: "Settled This Month", value: String(settledThisMonth.length), detail: `Total ${formatCurrency(settledThisMonthTotal)}`, icon: CheckCircle2, style: "border-violet-100 bg-violet-50/80", iconStyle: "bg-violet-100 text-violet-600" }
+        ].map((card) => {
+          const Icon = card.icon;
+          return <article key={card.label} className={`flex min-h-[84px] items-center gap-3 rounded-xl border px-3 py-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.03)] sm:px-4 ${card.style}`}>
+            <span className={`grid size-9 shrink-0 place-items-center rounded-full ${card.iconStyle}`}><Icon size={17} strokeWidth={2.2} /></span>
+            <div className="min-w-0">
+              <p className="truncate text-[11px] font-semibold text-slate-600">{card.label}</p>
+              <p className="mt-0.5 truncate text-lg font-bold leading-5 text-slate-900">{card.value}</p>
+              <p className="mt-0.5 truncate text-[10px] font-medium text-slate-500">{card.detail}</p>
+            </div>
+          </article>;
+        })}
       </section>
       <section className="relative space-y-3">
-      <div className="flex items-center justify-between px-1">
-        <h2 className="text-sm font-bold text-charcoal">{tab}</h2>
-        <div className="flex items-center gap-2">
-          <FilterButton refProp={filterButtonRef} active={filterOpen} count={filterChips.length} onClick={() => { setDraftFilters(filters); setFilterOpen((open) => !open); }}>
-            <SlidersHorizontal size={16} /> Filter
-          </FilterButton>
-          <span className="text-xs font-semibold text-muted">{tab === "Expenses" ? expenseResource.items.length : filtered.length} item{(tab === "Expenses" ? expenseResource.items.length : filtered.length) === 1 ? "" : "s"}</span>
+      <div className="flex flex-col gap-2 rounded-xl border border-slate-200/80 bg-white p-2 shadow-[0_1px_3px_rgba(15,23,42,0.04)] lg:flex-row lg:items-center">
+        <label className="flex h-9 min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-slate-400 lg:w-[260px] lg:shrink-0">
+          <Search size={15} />
+          <input aria-label="Search settlements" value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Search people, type, or notes..." className="min-w-0 flex-1 bg-transparent text-xs font-medium text-slate-700 outline-none placeholder:text-slate-400" />
+          {searchText && <button type="button" onClick={() => setSearchText("")} aria-label="Clear search" className="text-slate-400"><X size={14} /></button>}
+        </label>
+        <div className="no-scrollbar flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
+          {tabs.map((item) => <button key={item} type="button" onClick={() => selectTab(item)} className={`shrink-0 rounded-lg px-3 py-2 text-[11px] font-semibold transition ${tab === item ? "bg-blue-600 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>{item}</button>)}
+        </div>
+        <div className="flex shrink-0 items-center justify-end gap-1.5">
+          <button type="button" onClick={() => { setDraftFilters(filters); setFilterOpen((open) => !open); }} aria-label="Advanced filters" className={`grid size-9 place-items-center rounded-lg border text-slate-600 ${filterOpen ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-white hover:bg-slate-50"}`}><SlidersHorizontal size={15} />{filterChips.length > 0 && <span className="sr-only">{filterChips.length} filters active</span>}</button>
+          <label className="flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 text-slate-500">
+            <TrendingDown size={14} className="rotate-180" />
+            <select aria-label="Sort settlements" value={settlementSort} onChange={(event) => setSettlementSort(event.target.value)} className="max-w-[120px] bg-transparent text-[11px] font-semibold text-slate-700 outline-none">
+              <option value="latest">Latest First</option><option value="oldest">Oldest First</option>
+            </select>
+          </label>
         </div>
       </div>
+      <div className="flex items-center justify-between px-1 text-[11px] font-medium text-slate-500"><span>{tab === "Expenses" ? filteredExpenses.length : filtered.length} {tab === "Expenses" ? "expenses" : "records"}</span><span>{tab}</span></div>
       <ActiveFilterChips chips={filterChips} onRemove={removeFilter} onClear={clearFilters} />
       <CompactPopover
         open={filterOpen}
@@ -3911,13 +4123,14 @@ function SettlementCenter({ refreshKey, onSettled, onOpenObligation }) {
         onClose={() => setFilterOpen(false)}
         footer={<FilterActions onReset={() => setDraftFilters(emptyFilters)} onApply={() => { setFilters(draftFilters); setFilterOpen(false); }} />}
       >
+        <FilterSelect label="View" value={tab} onChange={selectTab} options={tabs.map((view) => ({ value: view, label: view === "Expenses" ? "Expense History" : view }))} />
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
             onClick={() => setDraftFilters({ ...draftFilters, allTime: "", startDate: "", endDate: "", month: currentMonth, year: currentYear })}
             className={`rounded-2xl px-3 py-2 text-sm font-bold ${!draftFilters.allTime && draftFilters.month === currentMonth && draftFilters.year === currentYear && !draftFilters.startDate && !draftFilters.endDate ? "bg-primary text-white" : "bg-paper text-charcoal"}`}
           >
-            Current Month
+            This Month
           </button>
           <button
             type="button"
@@ -3927,14 +4140,30 @@ function SettlementCenter({ refreshKey, onSettled, onOpenObligation }) {
             All Time
           </button>
         </div>
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            ["today", "Today"], ["this_week", "This Week"], ["last_month", "Last Month"]
+          ].map(([period, label]) => (
+            <button
+              key={period}
+              type="button"
+              onClick={() => {
+                const range = activityPeriodRange(period);
+                setDraftFilters({ ...draftFilters, allTime: "", month: "", year: "", startDate: range.startDate || "", endDate: range.endDate || "" });
+              }}
+              className="rounded-2xl bg-paper px-3 py-2 text-sm font-bold text-charcoal"
+            >{label}</button>
+          ))}
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <FilterSelect label="Month" value={draftFilters.month} onChange={(value) => setDraftFilters({ ...draftFilters, allTime: "", month: value, startDate: "", endDate: "" })} options={[{ value: "", label: "Any Month" }, ...monthOptions]} />
-          <FilterSelect label="Year" value={draftFilters.year} onChange={(value) => setDraftFilters({ ...draftFilters, allTime: "", year: value || currentYear, startDate: "", endDate: "" })} options={yearFilterOptions()} />
+          <FilterSelect label="Year" value={draftFilters.year} onChange={(value) => setDraftFilters({ ...draftFilters, allTime: "", year: value, startDate: "", endDate: "" })} options={yearFilterOptions()} />
         </div>
         <FilterSelect label="Person" value={draftFilters.person} onChange={(value) => setDraftFilters({ ...draftFilters, person: value })} options={resourceOptions(people.items, "All People")} />
         <FilterSelect label="Account" value={draftFilters.account} onChange={(value) => setDraftFilters({ ...draftFilters, account: value })} options={resourceOptions(accounts.items, "All Accounts")} />
         <FilterSelect label="Direction" value={draftFilters.direction} onChange={(value) => setDraftFilters({ ...draftFilters, direction: value })} options={[{ value: "", label: "Payable / Receivable" }, { value: "PAYABLE", label: "To Pay" }, { value: "RECEIVABLE", label: "To Receive" }]} />
         <FilterSelect label="Status" value={draftFilters.status} onChange={(value) => setDraftFilters({ ...draftFilters, status: value })} options={[{ value: "", label: "Any Status" }, { value: "PENDING", label: "Pending" }, { value: "PARTIAL", label: "Partial" }, { value: "SETTLED", label: "Settled" }, { value: "OVERDUE", label: "Overdue" }]} />
+        <FilterSelect label="Due State" value={draftFilters.dateState} onChange={(value) => setDraftFilters({ ...draftFilters, dateState: value })} options={[{ value: "", label: "Any Due State" }, { value: "TODAY", label: "Today" }, { value: "UPCOMING", label: "Upcoming" }, { value: "OVERDUE", label: "Overdue" }, { value: "NO_DATE", label: "No Due Date" }, { value: "PARTIAL", label: "Partial Settlement" }, { value: "SETTLED", label: "Settled" }]} />
         <FilterSelect label="Source Type" value={draftFilters.source} onChange={(value) => setDraftFilters({ ...draftFilters, source: value })} options={[{ value: "", label: "All Source Types" }, { value: "PAID_FOR_SOMEONE_AND_SPLIT", label: "Paid for Someone" }, ...sourceFilterOptions.map((value) => ({ value, label: sourceTypeLabel(value) }))]} />
         <FilterSelect label="Category" value={draftFilters.category} onChange={(value) => setDraftFilters({ ...draftFilters, category: value })} options={resourceOptions(categories.items, "All Categories")} />
         <FilterSelect label="Tag" value={draftFilters.tag} onChange={(value) => setDraftFilters({ ...draftFilters, tag: value })} options={resourceOptions(tags.items, "All Tags")} />
@@ -3946,43 +4175,64 @@ function SettlementCenter({ refreshKey, onSettled, onOpenObligation }) {
       </section>
       {tab === "Expenses" ? (
         <>
-          <ResourceState loading={expenseResource.loading} error={expenseResource.error} empty={!expenseResource.items.length} onRetry={expenseResource.refresh} emptyMessage="No expenses match these filters." />
-          <div className="space-y-3">
-            {expenseResource.items.map((transaction) => <ExpenseHistoryCard key={transaction._id} transaction={transaction} />)}
+          <ResourceState loading={expenseResource.loading} error={expenseResource.error} empty={!filteredExpenses.length} onRetry={expenseResource.refresh} emptyMessage="No expenses match these filters." />
+          <div className="space-y-2">
+            {filteredExpenses.map((transaction) => <ExpenseHistoryCard key={transaction._id} transaction={transaction} />)}
           </div>
         </>
       ) : (
         <>
           <ResourceState loading={resource.loading} error={resource.error} empty={!filtered.length} onRetry={resource.refresh} emptyMessage="No payment records match these filters." />
-          <div className="space-y-3">
+          <div className="space-y-2">
             {filtered.map((item) => {
-          const payable = item.direction === "PAYABLE";
-          const settled = item.status === "SETTLED" || Number(item.remainingAmount || 0) <= 0;
-          const isPartial = Number(item.settledAmount || 0) > 0 && !settled;
-          const partialLabel = payable ? "Partially Paid" : "Partially Received";
-          const isOverdue = item.status === "OVERDUE" || (item.dueDate && new Date(item.dueDate) < today);
-          const statusLabel = settled ? "Settled" : isOverdue ? `${isPartial ? `${partialLabel} · ` : ""}Overdue` : isPartial ? partialLabel : "Pending";
-          return (
-            <article key={item._id} className="rounded-3xl bg-cream p-4 shadow-card">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-base font-bold text-charcoal">{item.person?.name || "Unknown person"}</p>
-                  <p className="mt-1 truncate text-sm font-semibold text-muted">{obligationDescription(item)}</p>
+              const payable = item.direction === "PAYABLE";
+              const settled = item.settlementState === "SETTLED" || item.status === "SETTLED" || Number(item.remainingAmount || 0) <= 0;
+              const isPartial = item.settlementState === "PARTIAL" || (Number(item.settledAmount || 0) > 0 && !settled);
+              const isOverdue = item.dateState === "OVERDUE";
+              const statusLabel = settled ? "Settled" : isOverdue ? "Overdue" : isPartial ? payable ? "Partially Paid" : "Partially Received" : "Pending";
+              const personName = item.person?.name || "Unknown person";
+              const initials = item.person?.initials || personName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+              const statusTone = settled ? "bg-emerald-50 text-emerald-700" : isOverdue ? "bg-rose-50 text-rose-700" : isPartial ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700";
+              const createdDate = item.sourceTransaction?.transactionDate || item.createdAt;
+              return <article key={item._id} className="rounded-xl border border-slate-200/80 bg-white px-3 py-3 shadow-[0_1px_3px_rgba(15,23,42,0.045)] sm:px-4">
+                <div className="flex items-center gap-2.5">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-blue-50 text-[11px] font-bold text-blue-700">{initials}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-bold leading-4 text-slate-900">{personName}</p>
+                    <p className="mt-0.5 truncate text-[10px] font-medium text-slate-500">{sourceTypeLabel(item.sourceType)}</p>
+                  </div>
+                  <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold ${statusTone}`}>
+                    {settled && <CheckCircle2 size={11} />}{statusLabel}
+                  </span>
+                  <MoreHorizontal aria-hidden="true" size={17} className="shrink-0 text-slate-400" />
                 </div>
-                <span className={`rounded-full px-3 py-1 text-xs font-bold ${settled ? "bg-emeraldSoft text-emerald" : isOverdue ? "bg-coralSoft text-coral" : isPartial ? "bg-amberSoft text-amber" : "bg-paper text-muted"}`}>{statusLabel}</span>
-              </div>
-              <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl bg-paper p-3">
-                <div><p className="text-[10px] font-bold uppercase text-muted">Original</p><p className="mt-1 text-xs font-bold">{formatCurrency(item.originalAmount)}</p></div>
-                <div><p className="text-[10px] font-bold uppercase text-muted">{payable ? "Paid" : "Received"}</p><p className="mt-1 text-xs font-bold">{formatCurrency(item.settledAmount)}</p></div>
-                <div><p className="text-[10px] font-bold uppercase text-muted">Remaining</p><p className="mt-1 text-xs font-bold">{formatCurrency(item.remainingAmount)}</p></div>
-              </div>
-              <p className="mt-3 text-xs font-semibold text-muted">Created {formatShortDate(item.sourceTransaction?.transactionDate || item.createdAt)} · {item.dueDate ? `${payable ? "Due" : "Expected"}: ${formatShortDate(item.dueDate)}` : "No due date"} · {sourceTypeLabel(item.sourceType)}</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {!settled && <button onClick={() => { setSelected(item); setSettleOpen(true); }} className="rounded-full bg-primary px-4 py-2 text-xs font-bold text-white">{payable ? "Pay Now" : "Receive"}</button>}
-                <button onClick={() => onOpenObligation(item._id)} className="rounded-full bg-violetSoft px-4 py-2 text-xs font-bold text-primary">View History</button>
-              </div>
-            </article>
-          );
+                <div className="mt-3 grid grid-cols-2 gap-y-1 rounded-lg border border-slate-100 bg-slate-50/80 py-2 sm:grid-cols-3 sm:divide-x sm:divide-slate-200/80 sm:gap-y-0">
+                  {[
+                    { label: "Original Amount", amount: item.originalAmount, icon: Receipt, color: "text-slate-500", bg: "bg-slate-200/70" },
+                    { label: payable ? "Paid" : "Received", amount: item.settledAmount, icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-100" },
+                    { label: "Remaining", amount: item.remainingAmount, icon: CircleDollarSign, color: settled ? "text-emerald-600" : "text-rose-600", bg: settled ? "bg-emerald-100" : "bg-rose-100" }
+                  ].map((metric) => {
+                    const Icon = metric.icon;
+                    return <div key={metric.label} className="flex min-w-0 items-center gap-1.5 px-2 sm:gap-2 sm:px-3">
+                      <span className={`grid size-6 shrink-0 place-items-center rounded-md ${metric.bg} ${metric.color}`}><Icon size={12} /></span>
+                      <div className="min-w-0">
+                        <p className="truncate text-[8px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[9px]">{metric.label}</p>
+                        <p className={`mt-0.5 truncate text-[11px] font-bold leading-4 text-slate-900 sm:text-xs ${metric.label === "Remaining" && !settled ? "text-rose-700" : ""}`}>{formatCurrency(metric.amount)}</p>
+                      </div>
+                    </div>;
+                  })}
+                </div>
+                <div className="mt-2.5 flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-[9px] font-medium text-slate-500">
+                    <span className="inline-flex items-center gap-1"><CalendarDays size={11} />Created {formatShortDate(createdDate)}</span>
+                    <span className="inline-flex items-center gap-1"><CalendarDays size={11} />{item.dueDate ? `Due ${formatShortDate(item.dueDate)}` : "No due date"}</span>
+                  </div>
+                  <div className="flex shrink-0 gap-1.5 sm:justify-end">
+                    {!settled && <button type="button" onClick={() => { setSelected(item); setSettleOpen(true); }} className="rounded-md bg-blue-600 px-3 py-1.5 text-[10px] font-semibold text-white shadow-sm hover:bg-blue-700">{payable ? "Pay Now" : "Receive Now"}</button>}
+                    <button type="button" onClick={() => onOpenObligation(item._id)} className="rounded-md border border-blue-100 bg-blue-50 px-3 py-1.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-100">View History</button>
+                  </div>
+                </div>
+              </article>;
             })}
           </div>
         </>
@@ -4021,10 +4271,11 @@ function LedgerMetric({ label, value, tone, onClick, active = false }) {
 function settlementFilterDateRange(filters) {
   if (filters.allTime) return {};
   if (filters.startDate || filters.endDate) return { startDate: filters.startDate, endDate: filters.endDate };
-  if (filters.month && filters.year) {
+  if (filters.month) {
+    const year = filters.year || String(new Date().getFullYear());
     const month = String(filters.month).padStart(2, "0");
-    const lastDay = String(new Date(Number(filters.year), Number(filters.month), 0).getDate()).padStart(2, "0");
-    return { startDate: `${filters.year}-${month}-01`, endDate: `${filters.year}-${month}-${lastDay}` };
+    const lastDay = String(new Date(Number(year), Number(filters.month), 0).getDate()).padStart(2, "0");
+    return { startDate: `${year}-${month}-01`, endDate: `${year}-${month}-${lastDay}` };
   }
   if (filters.year) return { startDate: `${filters.year}-01-01`, endDate: `${filters.year}-12-31` };
   return {};
@@ -5288,9 +5539,9 @@ function TransactionRow({ transaction }) {
   );
 }
 
-function PageHeader({ icon: Icon, title, subtitle }) {
+function PageHeader({ icon: Icon, title, subtitle, className = "" }) {
   return (
-    <header className="flex items-center justify-between">
+    <header className={`flex items-center justify-between ${className}`}>
       <div>
         <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
         <p className="mt-1 text-sm font-semibold text-muted">{subtitle}</p>
@@ -5685,7 +5936,7 @@ function BottomNav({ activeTab, onChange, onAdd }) {
   const items = navigationItems.filter((item) => ["home", "activity", "people", "settlements"].includes(item.id));
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 mx-auto max-w-md px-5 pb-4 md:hidden">
+    <nav className="safe-area-bottom-nav fixed inset-x-0 z-40 mx-auto max-w-md px-5 pb-4 md:hidden">
       <div className="relative grid grid-cols-5 items-center rounded-[1.6rem] bg-cream px-2 py-3 shadow-soft">
         {items.slice(0, 2).map((item) => (
           <NavItem key={item.id} item={item} active={activeTab === item.id} onClick={() => onChange(item.id)} />
@@ -5728,8 +5979,37 @@ function AddTransactionSheet({ open, onClose, onCreated }) {
   const [presetIcon, setPresetIcon] = useState("Receipt");
   const [presetFavorite, setPresetFavorite] = useState(false);
   const [editingPresetId, setEditingPresetId] = useState("");
+  const [presetsExpanded, setPresetsExpanded] = useState(false);
+  const [presetSearch, setPresetSearch] = useState("");
+  const [presetCategory, setPresetCategory] = useState("Recent");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const scrollY = window.scrollY;
+    const previousBody = {
+      position: document.body.style.position,
+      top: document.body.style.top,
+      left: document.body.style.left,
+      right: document.body.style.right,
+      width: document.body.style.width,
+      overflow: document.body.style.overflow
+    };
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.left = "0";
+    document.body.style.right = "0";
+    document.body.style.width = "100%";
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      Object.assign(document.body.style, previousBody);
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      window.scrollTo(0, scrollY);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -5739,6 +6019,9 @@ function AddTransactionSheet({ open, onClose, onCreated }) {
       setPresetIcon("Receipt");
       setPresetFavorite(false);
       setEditingPresetId("");
+      setPresetsExpanded(false);
+      setPresetSearch("");
+      setPresetCategory("Recent");
       setError("");
     }
   }, [open]);
@@ -5794,17 +6077,35 @@ function AddTransactionSheet({ open, onClose, onCreated }) {
     selectedType === "INCOME" ? item.type === "INCOME" : item.type === "EXPENSE"
   );
   const quickExpensePresets = useMemo(
-    () => quickAddResource.items.filter((preset) => preset.type === "EXPENSE"),
+    () => [...new Map(quickAddResource.items.filter((preset) => preset.type === "EXPENSE").map((preset) => [String(preset._id), preset])).values()],
     [quickAddResource.items]
   );
-  const quickPresetSections = useMemo(
-    () => [
-      { label: "Favorites", items: quickExpensePresets.filter((preset) => preset.favorite) },
-      { label: "Recently Used", items: quickExpensePresets.filter((preset) => !preset.favorite && preset.lastUsedAt) },
-      { label: "Other Presets", items: quickExpensePresets.filter((preset) => !preset.favorite && !preset.lastUsedAt) }
-    ].filter((section) => section.items.length > 0),
+  const recentlyUsedPresets = useMemo(
+    () => quickExpensePresets
+      .filter((preset) => preset.lastUsedAt || Number(preset.usageCount || 0) > 0)
+      .sort((a, b) => {
+        const lastUsedDelta = new Date(b.lastUsedAt || 0).getTime() - new Date(a.lastUsedAt || 0).getTime();
+        return lastUsedDelta || Number(b.usageCount || 0) - Number(a.usageCount || 0);
+      })
+      .slice(0, 4),
     [quickExpensePresets]
   );
+  const presetCategoryOptions = ["Recent", "Food", "Bills", "Travel", "Daily", "Entertainment", "All", "Other Presets"];
+  const visibleQuickPresets = useMemo(() => {
+    const search = presetSearch.trim().toLowerCase();
+    const source = presetCategory === "Recent" ? recentlyUsedPresets : quickExpensePresets;
+    return source.filter((preset) => {
+      const group = String(preset.presetGroup || "").trim().toLowerCase();
+      const categoryName = String(preset.category?.name || "").trim().toLowerCase();
+      const matchesCategory = presetCategory === "All" || presetCategory === "Recent"
+        || (presetCategory === "Other Presets"
+          ? !["food", "bills", "travel", "daily", "entertainment"].includes(group)
+          : group === presetCategory.toLowerCase() || categoryName === presetCategory.toLowerCase());
+      const searchable = [preset.name, preset.note, preset.presetGroup, preset.category?.name]
+        .filter(Boolean).join(" ").toLowerCase();
+      return matchesCategory && (!search || searchable.includes(search));
+    });
+  }, [presetSearch, presetCategory, recentlyUsedPresets, quickExpensePresets]);
 
   const applyPreset = (preset, trackUsage = true) => {
     const type = preset.type || "EXPENSE";
@@ -5886,110 +6187,143 @@ function AddTransactionSheet({ open, onClose, onCreated }) {
     }
   };
 
+  const renderPresetCard = (preset) => (
+    <div key={preset._id} className="min-w-0 rounded-2xl bg-cream p-2">
+      <button type="button" onClick={() => applyPreset(preset)} className="w-full min-w-0 text-left">
+        <span className="block truncate text-xs font-bold text-charcoal">{preset.name}</span>
+        <span className="mt-1 block truncate text-[11px] font-bold text-muted">
+          {preset.category?.name || preset.presetGroup || "Expense"}
+          {preset.amount ? ` · ${formatCurrency(preset.amount)}` : ""}
+        </span>
+      </button>
+      <div className="mt-2 flex items-center gap-1">
+        <button type="button" onClick={() => togglePresetFavorite(preset)} className={`grid size-7 place-items-center rounded-xl ${preset.favorite ? "bg-amberSoft text-amber" : "bg-paper text-muted"}`} aria-label={preset.favorite ? "Remove favorite" : "Mark favorite"}>
+          <Star size={14} fill={preset.favorite ? "currentColor" : "none"} />
+        </button>
+        <button type="button" onClick={() => editPreset(preset)} className="grid size-7 place-items-center rounded-xl bg-violetSoft text-primary" aria-label="Edit quick expense">
+          <Edit3 size={14} />
+        </button>
+        <button type="button" onClick={() => deletePreset(preset)} className="grid size-7 place-items-center rounded-xl bg-coralSoft text-coral" aria-label="Delete quick expense">
+          <Trash2 size={14} />
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className={`fixed inset-0 z-50 transition ${open ? "pointer-events-auto" : "pointer-events-none"}`}>
       <button
-        className={`absolute inset-0 bg-charcoal/30 transition-opacity ${open ? "opacity-100" : "opacity-0"}`}
+        className={`absolute inset-0 touch-manipulation bg-charcoal/30 transition-opacity ${open ? "opacity-100" : "opacity-0"}`}
         onClick={onClose}
         aria-label="Close add transaction"
       />
       <section
-        className={`absolute inset-x-0 bottom-0 mx-auto max-w-md rounded-t-[2rem] bg-cream px-5 pb-7 pt-4 shadow-soft transition-transform duration-300 md:bottom-auto md:top-1/2 md:max-w-2xl md:rounded-3xl md:px-6 md:pb-6 ${
+        className={`transaction-sheet absolute inset-x-0 bottom-0 mx-auto flex w-full max-w-md flex-col rounded-t-[2rem] bg-cream px-5 pt-3 shadow-soft transition-transform duration-300 md:bottom-auto md:top-1/2 md:max-w-2xl md:rounded-3xl md:px-6 ${
           open ? "translate-y-0 md:-translate-y-1/2" : "translate-y-full md:translate-y-full"
         }`}
       >
-        <div className="mx-auto h-1.5 w-12 rounded-full bg-[#D8D0C4]" />
-        <div className="mt-5 flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-bold">{selectedType ? transactionLabel(selectedType) : "Add Transaction"}</h2>
-            <p className="mt-1 text-sm font-semibold text-muted">
-              {selectedType ? "Details stay editable until saved" : "Choose the entry type"}
-            </p>
+        <div className="transaction-sheet-header -mx-5 -mt-3 px-5 pb-3 pt-3 md:-mx-6 md:px-6">
+          <div className="mx-auto h-1.5 w-12 rounded-full bg-[#D8D0C4]" />
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              {selectedType && <button type="button" onClick={() => setSelectedType("")} aria-label="Back to transaction types" className="grid size-11 shrink-0 place-items-center rounded-2xl bg-paper text-muted"><ChevronLeft size={20} /></button>}
+              <div className="min-w-0">
+                <h2 className="text-xl font-bold">{selectedType ? transactionLabel(selectedType) : "Add Transaction"}</h2>
+                <p className="mt-1 text-sm font-semibold text-muted">
+                  {selectedType ? "Details stay editable until saved" : "Choose the entry type"}
+                </p>
+              </div>
+            </div>
+            <button type="button" onClick={onClose} aria-label="Close add transaction" className="grid size-11 min-h-11 min-w-11 shrink-0 place-items-center rounded-2xl bg-paper text-muted">
+              <X size={20} />
+            </button>
           </div>
-          <button onClick={selectedType ? () => setSelectedType("") : onClose} className="grid size-10 place-items-center rounded-2xl bg-paper text-muted">
-            <X size={20} />
-          </button>
         </div>
+        <div className="transaction-sheet-content">
         {!selectedType ? (
-          <div className="mt-5 space-y-4">
-            {quickPresetSections.length > 0 && (
-              <section className="rounded-3xl bg-paper p-3">
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-muted">Quick Expense</p>
-                  <span className="text-[11px] font-bold text-muted">Tap to prefill</span>
+          <div className="transaction-type-content mt-3 space-y-3">
+            <div className="transaction-type-grid grid grid-cols-2 gap-3">
+              {addOptions.map((option, index) => {
+                const Icon = icons[index];
+                const tone = ["coral", "income", "emerald", "amber", "emerald", "amber", "primary", "income", "coral"][index];
+                const enabled = Boolean(optionToTransactionType(option));
+                return (
+                  <button
+                    key={option}
+                    onClick={() => begin(option)}
+                    disabled={!enabled}
+                    className="flex min-h-20 min-w-0 items-center gap-3 rounded-3xl bg-paper p-3 text-left disabled:opacity-50"
+                  >
+                    <span className={`grid size-11 shrink-0 place-items-center rounded-2xl ${formatTone(tone)}`}>
+                      <Icon size={20} />
+                    </span>
+                    <span className="min-w-0 text-sm font-bold leading-tight">{option}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {error && <p className="whitespace-pre-line rounded-2xl bg-coralSoft p-3 text-sm font-bold text-coral">{error}</p>}
+
+            <section className="quick-expense-card rounded-3xl bg-paper p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-muted">Quick Expense</h3>
+                  <p className="mt-1 text-[11px] font-semibold text-muted">Recently Used</p>
                 </div>
-                <div className="max-h-52 space-y-3 overflow-y-auto pr-1">
-                  {quickPresetSections.map((section) => (
-                    <div key={section.label}>
-                      <p className="mb-2 text-[11px] font-bold text-muted">{section.label}</p>
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                        {section.items.map((preset) => (
-                          <div key={preset._id} className="rounded-2xl bg-cream p-2">
-                            <button type="button" onClick={() => applyPreset(preset)} className="w-full text-left">
-                              <span className="block truncate text-xs font-bold text-charcoal">{preset.name}</span>
-                              <span className="mt-1 block truncate text-[11px] font-bold text-muted">
-                                {preset.category?.name || preset.presetGroup || "Expense"}
-                                {preset.amount ? ` · ${formatCurrency(preset.amount)}` : ""}
-                              </span>
-                            </button>
-                            <div className="mt-2 flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => togglePresetFavorite(preset)}
-                                className={`grid size-7 place-items-center rounded-xl ${preset.favorite ? "bg-amberSoft text-amber" : "bg-paper text-muted"}`}
-                                aria-label={preset.favorite ? "Remove favorite" : "Mark favorite"}
-                              >
-                                <Star size={14} fill={preset.favorite ? "currentColor" : "none"} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => editPreset(preset)}
-                                className="grid size-7 place-items-center rounded-xl bg-violetSoft text-primary"
-                                aria-label="Edit quick expense"
-                              >
-                                <Edit3 size={14} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => deletePreset(preset)}
-                                className="grid size-7 place-items-center rounded-xl bg-coralSoft text-coral"
-                                aria-label="Delete quick expense"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                {!presetsExpanded && <span className="text-[11px] font-semibold text-muted">Up to 4 presets</span>}
+              </div>
+              {!presetsExpanded ? (
+                <>
+                  {recentlyUsedPresets.length ? (
+                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      {recentlyUsedPresets.map(renderPresetCard)}
                     </div>
-                  ))}
+                  ) : (
+                    <p className="mt-2 text-xs text-muted">Your recently used presets will appear here.</p>
+                  )}
+                  <button type="button" onClick={() => { setPresetCategory("All"); setPresetsExpanded(true); }} className="mt-3 w-full rounded-xl bg-white px-3 py-2 text-xs font-bold text-primary">
+                    View All Presets
+                  </button>
+                </>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  <input
+                    type="search"
+                    aria-label="Search presets"
+                    placeholder="Search presets..."
+                    value={presetSearch}
+                    onChange={(event) => setPresetSearch(event.target.value)}
+                    className="w-full rounded-xl border border-[#E5EAF0] bg-white px-3 py-2 text-sm outline-none focus:border-primary"
+                  />
+                  <div className="no-scrollbar flex gap-2 overflow-x-auto pb-1">
+                    {presetCategoryOptions.map((category) => (
+                      <button
+                        key={category}
+                        type="button"
+                        onClick={() => setPresetCategory(category)}
+                        className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${presetCategory === category ? "bg-primary text-white" : "bg-white text-muted"}`}
+                      >
+                        {category}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] font-bold text-muted">{presetCategory === "Recent" ? "Recently Used" : presetCategory}</p>
+                  {visibleQuickPresets.length ? (
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {visibleQuickPresets.map(renderPresetCard)}
+                    </div>
+                  ) : (
+                    <p className="rounded-xl bg-white p-3 text-xs text-muted">No presets found.</p>
+                  )}
+                  <button type="button" onClick={() => { setPresetsExpanded(false); setPresetSearch(""); setPresetCategory("Recent"); }} className="w-full rounded-xl bg-white px-3 py-2 text-xs font-bold text-primary">
+                    Show Less
+                  </button>
                 </div>
-              </section>
-            )}
-          <div className="grid grid-cols-2 gap-3">
-            {addOptions.map((option, index) => {
-              const Icon = icons[index];
-            const tone = ["coral", "income", "emerald", "amber", "emerald", "amber", "primary", "income", "coral"][index];
-              const enabled = Boolean(optionToTransactionType(option));
-              return (
-                <button
-                  key={option}
-                  onClick={() => begin(option)}
-                  disabled={!enabled}
-                  className="flex min-h-20 items-center gap-3 rounded-3xl bg-paper p-3 text-left disabled:opacity-50"
-                >
-                  <span className={`grid size-11 place-items-center rounded-2xl ${formatTone(tone)}`}>
-                    <Icon size={20} />
-                  </span>
-                  <span className="text-sm font-bold leading-tight">{option}</span>
-                </button>
-              );
-            })}
-          </div>
-          {error && <p className="whitespace-pre-line rounded-2xl bg-coralSoft p-3 text-sm font-bold text-coral">{error}</p>}
+              )}
+            </section>
           </div>
         ) : (
-          <form onSubmit={submit} className="mt-5 max-h-[67vh] space-y-3 overflow-y-auto pb-2">
+          <form onSubmit={submit} className="transaction-type-content mt-4 space-y-3 pb-2">
             <FormInput label="Amount" type="number" value={form.amount} onChange={(value) => setForm({ ...form, amount: value })} />
             {!someonePaidForMe && (
               <ResourceSelect
@@ -6105,6 +6439,7 @@ function AddTransactionSheet({ open, onClose, onCreated }) {
             </button>
           </form>
         )}
+        </div>
       </section>
     </div>
   );

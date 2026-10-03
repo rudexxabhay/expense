@@ -12,6 +12,7 @@ import TransactionAudit from "../models/TransactionAudit.js";
 import Notification from "../models/Notification.js";
 import SettlementAllocation from "../models/SettlementAllocation.js";
 import FinancialRequest from "../models/FinancialRequest.js";
+import User from "../models/User.js";
 import asyncHandler from "../middleware/asyncHandler.js";
 import ApiError from "../utils/ApiError.js";
 import { successResponse } from "../utils/apiResponse.js";
@@ -28,9 +29,10 @@ import {
   RECEIVABLE_TYPES,
   SETTLEMENT_TYPES,
   directionTypes,
-  dueBucketExpression,
+  classifyObligation,
   dueDateMatch,
   incomeValue,
+  normalizeFinanceTimeZone,
   personalExpenseAmountExpression,
   personalExpenseValue,
   summarizeOutstandingByType
@@ -233,7 +235,8 @@ function buildFilters(query, userId) {
     filters.remainingAmount = { $gt: 0 };
     delete filters.transactionDate;
 
-    filters.dueDate = dueDateMatch(due);
+    const dueMatch = dueDateMatch(due, query.timeZone);
+    if (dueMatch) Object.assign(filters, dueMatch);
   }
 
   const dashboardViews = {
@@ -274,19 +277,18 @@ function buildFilters(query, userId) {
     filters.$or = [{ repaymentStatus: "PAID" }, { remainingAmount: { $lte: 0 } }];
   }
   if (["overdue_payable", "overdue_receivable"].includes(query.balanceStatus)) {
-    const today = startOfDay(new Date());
     filters.type = { $in: query.balanceStatus === "overdue_payable" ? PAYABLE_TYPES : RECEIVABLE_TYPES };
     filters.status = "ACTIVE";
     filters.repaymentStatus = { $in: OPEN_REPAYMENT_STATUSES };
     filters.remainingAmount = { $gt: 0 };
-    filters.dueDate = { $lt: today };
+    Object.assign(filters, dueDateMatch("OVERDUE", query.timeZone));
     delete filters.transactionDate;
   } else if (query.balanceStatus === "overdue") {
     filters.type = { $in: [...PAYABLE_TYPES, ...RECEIVABLE_TYPES] };
     filters.status = "ACTIVE";
     filters.repaymentStatus = { $in: OPEN_REPAYMENT_STATUSES };
     filters.remainingAmount = { $gt: 0 };
-    filters.dueDate = { $lt: startOfDay(new Date()) };
+    Object.assign(filters, dueDateMatch("OVERDUE", query.timeZone));
     delete filters.transactionDate;
   } else if (query.overdue === "true") {
     throw new ApiError("Choose payable or receivable for overdue filters", 400);
@@ -820,17 +822,17 @@ export const getTransactionSummary = asyncHandler(async (req, res) => {
   await ensureUserObligations(req.userId);
   await refreshUserObligationStatuses(req.userId);
   const now = new Date();
-  const dateRange = resolveDateRange({
-    ...req.query,
-    month: req.query.month || now.getMonth() + 1,
-    year: req.query.year || now.getFullYear()
-  });
-  const periodMatch = { userId: req.userId, status: "ACTIVE", transactionDate: dateRange };
-  const today = startOfDay(now);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
-
-  const [accounts, periodTotals, personOutstanding, peopleOutstanding, partialSettlementCount, dueBuckets, periodSettlements] = await Promise.all([
+  const userSettings = await User.findById(req.userId).select("preferences.timezone").lean();
+  const timeZone = normalizeFinanceTimeZone(userSettings?.preferences?.timezone);
+  const dateRange = req.query.allTime === "true"
+    ? null
+    : resolveDateRange({
+      ...req.query,
+      month: req.query.month || now.getMonth() + 1,
+      year: req.query.year || now.getFullYear()
+    });
+  const periodMatch = { userId: req.userId, status: "ACTIVE", ...(dateRange ? { transactionDate: dateRange } : {}) };
+  const [accounts, periodTotals, personOutstanding, peopleOutstanding, currentObligations, periodSettlements, allTimeSettlements] = await Promise.all([
     Account.find({ userId: req.userId, isActive: true }),
     Transaction.aggregate([
       {
@@ -935,42 +937,41 @@ export const getTransactionSummary = asyncHandler(async (req, res) => {
       },
       { $sort: { amount: -1 } }
     ]),
-    Obligation.countDocuments({ userId: req.userId, status: { $nin: ["SETTLED", "CANCELLED"] }, settledAmount: { $gt: 0 }, remainingAmount: { $gt: 0 } }),
-    Obligation.aggregate([
-      {
-        $match: {
-          userId: req.userId,
-          status: { $nin: ["SETTLED", "CANCELLED"] },
-          remainingAmount: { $gt: 0 },
-          dueDate: { $ne: null }
-        }
-      },
-      {
-        $group: {
-          _id: {
-            direction: "$direction",
-            bucket: dueBucketExpression(today, tomorrow)
-          },
-          total: { $sum: "$remainingAmount" },
-          count: { $sum: 1 }
-        }
-      }
+    Obligation.find({ userId: req.userId, status: { $nin: ["SETTLED", "CANCELLED"] }, remainingAmount: { $gt: 0 } })
+      .select("direction dueDate remainingAmount settledAmount status")
+      .lean(),
+    Settlement.aggregate([
+      { $match: { userId: req.userId, status: "ACTIVE", ...(dateRange ? { settlementDate: dateRange } : {}) } },
+      { $group: { _id: "$direction", total: { $sum: { $ifNull: ["$totalAmount", "$amount"] } } } }
     ]),
     Settlement.aggregate([
-      { $match: { userId: req.userId, status: "ACTIVE", settlementDate: dateRange } },
-      { $group: { _id: "$direction", total: { $sum: { $ifNull: ["$totalAmount", "$amount"] } } } }
+      { $match: { userId: req.userId, status: "ACTIVE", direction: { $in: ["PAYMENT", "RECEIPT", "PAID_BY_ME", "RECEIVED_BY_ME"] } } },
+      { $group: { _id: null, total: { $sum: { $ifNull: ["$totalAmount", "$amount"] } } } }
     ])
   ]);
 
   const byType = periodTotals.reduce((acc, item) => ({ ...acc, [item._id]: item }), {});
   const outstandingTotals = summarizeOutstandingByType(personOutstanding);
+  const classifiedPeopleOutstanding = peopleOutstanding.map((item) => ({
+    ...item,
+    breakdown: (item.breakdown || []).map((obligation) => ({
+      ...obligation,
+      ...classifyObligation(obligation, now, timeZone)
+    }))
+  }));
   const availableMoney = accounts.reduce((sum, account) => sum + Number(account.currentBalance || 0), 0);
-  const dueTotals = dueBuckets.reduce((totals, item) => {
-    const key = `${item._id.direction.toLowerCase()}${item._id.bucket[0]}${item._id.bucket.slice(1).toLowerCase()}`;
-    totals[key] = item.total;
-    totals[`${key}Count`] = item.count;
-    return totals;
-  }, {});
+  const dueTotals = {};
+  let partialSettlementCount = 0;
+  currentObligations.forEach((obligation) => {
+    const classification = classifyObligation(obligation, now, timeZone);
+    if (classification.settlementState === "PARTIAL") partialSettlementCount += 1;
+    if (!["TODAY", "UPCOMING", "OVERDUE"].includes(classification.dateState)) return;
+    if (!["PAYABLE", "RECEIVABLE"].includes(obligation.direction)) return;
+    const key = `${obligation.direction.toLowerCase()}${classification.dateState[0]}${classification.dateState.slice(1).toLowerCase()}`;
+    dueTotals[key] = Number((Number(dueTotals[key] || 0) + Number(obligation.remainingAmount || 0)).toFixed(2));
+    dueTotals[`${key}Count`] = Number(dueTotals[`${key}Count`] || 0) + 1;
+  });
+  const settledAllTime = Number(allTimeSettlements[0]?.total || 0);
   const personalExpense = personalExpenseValue(byType);
   const settlementTotals = periodSettlements.reduce((totals, item) => {
     if (["RECEIPT", "RECEIVED_BY_ME"].includes(item._id)) totals.received += Number(item.total || 0);
@@ -986,8 +987,9 @@ export const getTransactionSummary = asyncHandler(async (req, res) => {
       personalExpense,
       expenseThisMonth: personalExpense,
       ...outstandingTotals,
-      peopleOutstanding,
+      peopleOutstanding: classifiedPeopleOutstanding,
       partialSettlementCount,
+      settledAllTime,
       receivedBack: settlementTotals.received,
       paidBack: settlementTotals.paid,
       payableToday: dueTotals.payableToday || 0,
@@ -1117,8 +1119,8 @@ export const getPersonLedger = asyncHandler(async (req, res) => {
   const person = await Person.findOne({ _id: req.params.id, userId: req.userId, isActive: true });
   if (!person) throw new ApiError("Person not found", 404);
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const userSettings = await User.findById(req.userId).select("preferences.timezone").lean();
+  const timeZone = normalizeFinanceTimeZone(userSettings?.preferences?.timezone);
   const filters = buildFilters(req.query, req.userId);
   filters.person = req.params.id;
   filters.status = "ACTIVE";
@@ -1159,7 +1161,7 @@ export const getPersonLedger = asyncHandler(async (req, res) => {
     filters.type = { $in: req.query.balanceStatus === "overdue_payable" ? PAYABLE_TYPES : req.query.balanceStatus === "overdue_receivable" ? RECEIVABLE_TYPES : [...PAYABLE_TYPES, ...RECEIVABLE_TYPES] };
     filters.remainingAmount = { $gt: 0 };
     filters.repaymentStatus = { $in: OPEN_REPAYMENT_STATUSES };
-    filters.dueDate = { $lt: today };
+    Object.assign(filters, dueDateMatch("OVERDUE", timeZone));
     delete filters.transactionDate;
   }
 
@@ -1195,13 +1197,15 @@ export const getPersonLedger = asyncHandler(async (req, res) => {
   if (req.query.balanceStatus === "settled") obligationFilter.status = "SETTLED";
   if (req.query.balanceStatus === "cancelled") obligationFilter.status = "CANCELLED";
   if (req.query.balanceStatus === "overdue") {
-    obligationFilter.status = "OVERDUE";
     obligationFilter.remainingAmount = { $gt: 0 };
+    obligationFilter.status = { $nin: ["SETTLED", "CANCELLED"] };
+    Object.assign(obligationFilter, dueDateMatch("OVERDUE", timeZone));
   }
   if (["overdue_payable", "overdue_receivable"].includes(req.query.balanceStatus)) {
     obligationFilter.direction = req.query.balanceStatus === "overdue_payable" ? "PAYABLE" : "RECEIVABLE";
-    obligationFilter.status = "OVERDUE";
+    obligationFilter.status = { $nin: ["SETTLED", "CANCELLED"] };
     obligationFilter.remainingAmount = { $gt: 0 };
+    Object.assign(obligationFilter, dueDateMatch("OVERDUE", timeZone));
   }
   if (req.query.startDate || req.query.endDate) {
     obligationFilter.createdAt = {
@@ -1245,6 +1249,7 @@ export const getPersonLedger = asyncHandler(async (req, res) => {
   const eventsByObligation = events.reduce((map, item) => map.set(String(item.obligation), [...(map.get(String(item.obligation)) || []), item]), new Map());
   const ledgerObligations = obligations.map((item) => ({
     ...item.toObject(),
+    ...classifyObligation(item, new Date(), timeZone),
     settlements: historyByObligation.get(String(item._id)) || [],
     events: eventsByObligation.get(String(item._id)) || []
   }));
@@ -1255,7 +1260,7 @@ export const getPersonLedger = asyncHandler(async (req, res) => {
     if (item.status === "SETTLED" || remaining <= 0) acc.settledAmount += Number(item.originalAmount || 0);
     if (open && item.direction === "RECEIVABLE") acc.totalToReceive += remaining;
     if (open && item.direction === "PAYABLE") acc.totalToPay += remaining;
-    if (item.dueDate && remaining > 0 && new Date(item.dueDate) < today) {
+    if (remaining > 0 && classifyObligation(item, new Date(), timeZone).dateState === "OVERDUE") {
       if (item.direction === "RECEIVABLE") acc.overdueReceivableAmount += remaining;
       if (item.direction === "PAYABLE") acc.overduePayableAmount += remaining;
     }

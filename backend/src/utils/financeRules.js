@@ -6,6 +6,71 @@ export const SETTLEMENT_TYPES = ["REPAYMENT_RECEIVED", "REPAYMENT_PAID"];
 export const TRANSFER_TYPES = ["TRANSFER"];
 export const LOAN_TYPES = [...RECEIVABLE_TYPES, ...PAYABLE_TYPES];
 export const OPEN_REPAYMENT_STATUSES = ["PENDING", "PARTIAL"];
+export const DEFAULT_FINANCE_TIME_ZONE = "Asia/Kolkata";
+
+export function normalizeFinanceTimeZone(timeZone = DEFAULT_FINANCE_TIME_ZONE) {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone }).format(new Date());
+    return timeZone;
+  } catch {
+    return DEFAULT_FINANCE_TIME_ZONE;
+  }
+}
+
+function localCalendarDateKey(value, timeZone = DEFAULT_FINANCE_TIME_ZONE, preserveDateOnly = false) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  // Date-only values are stored at UTC midnight; preserve their entered calendar day.
+  const dateOnly = preserveDateOnly && date.getUTCHours() === 0 && date.getUTCMinutes() === 0 && date.getUTCSeconds() === 0 && date.getUTCMilliseconds() === 0;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: dateOnly ? "UTC" : normalizeFinanceTimeZone(timeZone),
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+export function classifyObligation(obligation = {}, now = new Date(), timeZone = DEFAULT_FINANCE_TIME_ZONE) {
+  const remainingAmount = Number(obligation.remainingAmount || 0);
+  const settledAmount = Number(obligation.settledAmount || 0);
+  const cancelled = obligation.cancelled === true || obligation.status === "CANCELLED";
+  const settled = !cancelled && (remainingAmount <= 0 || obligation.status === "SETTLED");
+  const partial = !cancelled && !settled && (settledAmount > 0 || ["PARTIAL", "PARTIALLY_SETTLED"].includes(obligation.status));
+  const dateState = classifyDateState(obligation.dueDate, now, timeZone);
+  const settlementState = cancelled ? "CANCELLED" : settled ? "SETTLED" : partial ? "PARTIAL" : "OPEN";
+  return { dateState, settlementState };
+}
+
+export function classifyDateState(dueDate, now = new Date(), timeZone = DEFAULT_FINANCE_TIME_ZONE) {
+  const dueKey = localCalendarDateKey(dueDate, timeZone, true);
+  const todayKey = localCalendarDateKey(now, timeZone);
+  return !dueKey ? "NO_DATE" : dueKey < todayKey ? "OVERDUE" : dueKey > todayKey ? "UPCOMING" : "TODAY";
+}
+
+export function obligationDateStateExpression(timeZone = DEFAULT_FINANCE_TIME_ZONE) {
+  const zone = normalizeFinanceTimeZone(timeZone);
+  const dateOnly = { $eq: [{ $dateToString: { date: "$dueDate", format: "%H%M%S%L", timezone: "UTC" } }, "000000000"] };
+  const dueKey = {
+    $cond: [dateOnly,
+      { $dateToString: { date: "$dueDate", format: "%Y-%m-%d", timezone: "UTC" } },
+      { $dateToString: { date: "$dueDate", format: "%Y-%m-%d", timezone: zone } }
+    ]
+  };
+  const todayKey = { $dateToString: { date: "$$NOW", format: "%Y-%m-%d", timezone: zone } };
+  return {
+    $switch: {
+      branches: [
+        { case: { $eq: [{ $ifNull: ["$dueDate", null] }, null] }, then: "NO_DATE" },
+        { case: { $lt: [dueKey, todayKey] }, then: "OVERDUE" },
+        { case: { $gt: [dueKey, todayKey] }, then: "UPCOMING" }
+      ],
+      default: "TODAY"
+    }
+  };
+}
 
 export function accountBalanceDeltas(transaction, multiplier = 1) {
   const amount = Number(transaction.amount || 0);
@@ -88,31 +153,13 @@ export function directionTypes(direction) {
   return [];
 }
 
-export function dueDateMatch(due, now = new Date()) {
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  if (due === "TODAY") return { $gte: today, $lt: tomorrow };
-  if (due === "UPCOMING") return { $gte: tomorrow };
-  if (due === "OVERDUE") return { $lt: today };
-  return null;
+export function dueDateMatch(due, timeZone = DEFAULT_FINANCE_TIME_ZONE) {
+  if (!["TODAY", "UPCOMING", "OVERDUE"].includes(due)) return null;
+  return { $expr: { $eq: [obligationDateStateExpression(timeZone), due] } };
 }
 
 export function personalExpenseAmountExpression() {
   return { $ifNull: ["$myShare", "$amount"] };
-}
-
-export function dueBucketExpression(today, tomorrow) {
-  return {
-    $switch: {
-      branches: [
-        { case: { $lt: ["$dueDate", today] }, then: "OVERDUE" },
-        { case: { $lt: ["$dueDate", tomorrow] }, then: "TODAY" }
-      ],
-      default: "UPCOMING"
-    }
-  };
 }
 
 export function countsAsIncome(type) {

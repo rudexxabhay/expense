@@ -5,9 +5,10 @@ import Settlement from "../models/Settlement.js";
 import ObligationEvent from "../models/ObligationEvent.js";
 import ObligationMigration from "../models/ObligationMigration.js";
 import Notification from "../models/Notification.js";
+import User from "../models/User.js";
 import mongoose from "mongoose";
 import ApiError from "../utils/ApiError.js";
-import { PAYABLE_TYPES, RECEIVABLE_TYPES } from "../utils/financeRules.js";
+import { classifyObligation, DEFAULT_FINANCE_TIME_ZONE, normalizeFinanceTimeZone, PAYABLE_TYPES, RECEIVABLE_TYPES } from "../utils/financeRules.js";
 import { recordObligationStatusActivity } from "./activityEventService.js";
 
 export function obligationDetails(transaction, sourceType) {
@@ -49,16 +50,19 @@ export async function createObligationForTransaction(transaction, userId, sessio
   return obligation;
 }
 
-export function obligationStatus({ remainingAmount, settledAmount, dueDate, cancelled = false }, now = new Date()) {
-  if (cancelled) return "CANCELLED";
-  if (Number(remainingAmount) <= 0) return "SETTLED";
-  if (dueDate && new Date(dueDate).setHours(0, 0, 0, 0) < new Date(now).setHours(0, 0, 0, 0)) return "OVERDUE";
-  if (Number(settledAmount) > 0) return "PARTIALLY_SETTLED";
+export function obligationStatus(obligation = {}, now = new Date(), timeZone = DEFAULT_FINANCE_TIME_ZONE) {
+  const classification = classifyObligation(obligation, now, timeZone);
+  if (classification.settlementState === "CANCELLED") return "CANCELLED";
+  if (classification.settlementState === "SETTLED") return "SETTLED";
+  if (classification.dateState === "OVERDUE") return "OVERDUE";
+  if (classification.settlementState === "PARTIAL") return "PARTIALLY_SETTLED";
   return "PENDING";
 }
 
 export async function recalculateObligation(obligation, session, now = new Date()) {
   if (obligation.status === "CANCELLED") return obligation;
+  const userSettings = await User.findById(obligation.userId).select("preferences.timezone").lean();
+  const timeZone = normalizeFinanceTimeZone(userSettings?.preferences?.timezone || DEFAULT_FINANCE_TIME_ZONE);
   const allocations = await SettlementAllocation.aggregate([
     { $match: { userId: obligation.userId, obligation: obligation._id } },
     { $lookup: { from: "settlements", localField: "settlement", foreignField: "_id", as: "settlement" } },
@@ -75,7 +79,7 @@ export async function recalculateObligation(obligation, session, now = new Date(
   const originalAmount = Number(obligation.originalAmount);
   if (settledAmount - originalAmount > 0.005) throw new ApiError("Settlement allocations exceed the obligation amount", 409);
   const remainingAmount = Number(Math.max(0, originalAmount - settledAmount).toFixed(2));
-  const status = obligationStatus({ settledAmount, remainingAmount, dueDate: obligation.dueDate }, now);
+  const status = obligationStatus({ settledAmount, remainingAmount, dueDate: obligation.dueDate }, now, timeZone);
   const previousStatus = obligation.status;
   const previousRemaining = Number(obligation.remainingAmount || 0);
   obligation.settledAmount = settledAmount;
@@ -198,12 +202,14 @@ export async function ensureUserObligations(userId) {
 }
 
 export async function refreshUserObligationStatuses(userId, now = new Date()) {
+  const userSettings = await User.findById(userId).select("preferences.timezone").lean();
+  const timeZone = normalizeFinanceTimeZone(userSettings?.preferences?.timezone || DEFAULT_FINANCE_TIME_ZONE);
   const session = await mongoose.startSession();
   try {
     await session.withTransaction(async () => {
       const obligations = await Obligation.find({ userId, status: { $nin: ["SETTLED", "CANCELLED"] }, remainingAmount: { $gt: 0 } }).session(session);
       for (const obligation of obligations) {
-        const nextStatus = obligationStatus(obligation, now);
+        const nextStatus = obligationStatus(obligation, now, timeZone);
         if (nextStatus === obligation.status) continue;
         const previous = obligation.status;
         obligation.status = nextStatus;

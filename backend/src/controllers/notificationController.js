@@ -9,6 +9,7 @@ import { successResponse } from "../utils/apiResponse.js";
 import { processRecurringRules } from "./recurringController.js";
 import { deliverPush } from "../services/pushService.js";
 import PushSubscription from "../models/PushSubscription.js";
+import { classifyDateState, normalizeFinanceTimeZone } from "../utils/financeRules.js";
 
 function localParts(date, timeZone) {
   const values = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(date);
@@ -36,9 +37,8 @@ function dateKey(date, timeZone) {
 }
 
 function dayDiff(a, b, timeZone) {
-  const left = localParts(a, timeZone);
-  const right = localParts(b, timeZone);
-  return Math.round((Date.UTC(left.year, left.month - 1, left.day) - Date.UTC(right.year, right.month - 1, right.day)) / 86400000);
+  const state = classifyDateState(a, b, timeZone);
+  return state === "OVERDUE" ? -1 : state === "UPCOMING" ? 1 : 0;
 }
 
 function withTime(date, time, timeZone) {
@@ -79,7 +79,7 @@ async function upsertNotification(payload) {
 
 export async function processDueNotifications(userId) {
   const user = await User.findById(userId).select("preferences.timezone");
-  const timeZone = user?.preferences?.timezone || "Asia/Kolkata";
+  const timeZone = normalizeFinanceTimeZone(user?.preferences?.timezone);
   await ensureUserObligations(userId);
   await refreshUserObligationStatuses(userId);
   const now = new Date();
@@ -123,7 +123,7 @@ export async function processDueNotifications(userId) {
     const text = notificationText(item, dueDate, today, timeZone);
     const times = Array.isArray(item.sourceTransaction?.reminderTimes) && item.sourceTransaction.reminderTimes.length ? item.sourceTransaction.reminderTimes : ["09:00", "14:00", "20:00"];
 
-    if (today > dueDate) {
+    if (text.templateKey.endsWith("_OVERDUE")) {
       await upsertNotification({
         userId,
         notificationKey: `overdue:${item._id}:${dateKey(dueDate, timeZone)}:v${item.version}`,
