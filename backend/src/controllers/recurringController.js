@@ -97,7 +97,7 @@ function normalizeRule(body, userId) {
     transactionTime: body.transactionTime || "09:00",
     reminderEnabled: Boolean(body.reminderEnabled),
     reminderStartDaysBefore: Number(body.reminderStartDaysBefore ?? 3),
-    reminderTimes: Array.isArray(body.reminderTimes) && body.reminderTimes.length ? body.reminderTimes.slice(0, 3) : ["09:00", "14:00", "20:00"],
+    reminderTimes: Array.isArray(body.reminderTimes) && body.reminderTimes.length ? body.reminderTimes.slice(0, 3) : ["09:00", "14:00", "19:00"],
     isActive: body.isActive !== false
   };
 }
@@ -193,7 +193,7 @@ async function createRecurringReminder(rule, today, timeZone) {
   const todayParts = zonedParts(today, timeZone);
   const diff = Math.round((Date.UTC(dueParts.year, dueParts.month - 1, dueParts.day) - Date.UTC(todayParts.year, todayParts.month - 1, todayParts.day)) / 86400000);
   const message = diff === 0 ? "Due today" : diff === 1 ? "Due tomorrow" : `Due in ${diff} days`;
-  const times = Array.isArray(rule.reminderTimes) && rule.reminderTimes.length ? rule.reminderTimes : ["09:00", "14:00", "20:00"];
+  const times = Array.isArray(rule.reminderTimes) && rule.reminderTimes.length ? rule.reminderTimes : ["09:00", "14:00", "19:00"];
   const now = new Date();
   for (const time of times.slice(0, 3)) {
     const [hours, minutes] = time.split(":").map(Number);

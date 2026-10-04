@@ -20,7 +20,7 @@ const recurringRuleSchema = new mongoose.Schema(
     reminderStartDaysBefore: { type: Number, min: 0, max: 30, default: 3 },
     reminderTimes: {
       type: [String],
-      default: ["09:00", "14:00", "20:00"],
+      default: ["09:00", "14:00", "19:00"],
       validate: {
         validator(times) {
           return times.length <= 3 && times.every((time) => /^([01]\d|2[0-3]):[0-5]\d$/.test(time));

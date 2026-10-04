@@ -1,11 +1,17 @@
 import mongoose from "mongoose";
 import Budget from "../models/Budget.js";
 import Category from "../models/Category.js";
+import Settlement from "../models/Settlement.js";
 import Transaction from "../models/Transaction.js";
 import asyncHandler from "../middleware/asyncHandler.js";
 import ApiError from "../utils/ApiError.js";
 import { successResponse } from "../utils/apiResponse.js";
-import { PERSONAL_EXPENSE_TYPES, personalExpenseAmountExpression } from "../utils/financeRules.js";
+import {
+  PERSONAL_EXPENSE_TYPES,
+  payableSettlementExpenseMatch,
+  payableSettlementExpenseObligationMatch,
+  personalExpenseAmountExpression
+} from "../utils/financeRules.js";
 
 function isValidId(id) {
   return mongoose.Types.ObjectId.isValid(id);
@@ -26,7 +32,7 @@ async function assertCategory(category, userId) {
 
 async function budgetRows(userId, month, year) {
   const { start, end } = monthRange(month, year);
-  const [budgets, spending] = await Promise.all([
+  const [budgets, spending, settlementSpending] = await Promise.all([
     Budget.find({ userId, month, year, isActive: true }).populate("category", "name color icon"),
     Transaction.aggregate([
       {
@@ -44,10 +50,27 @@ async function budgetRows(userId, month, year) {
           spent: { $sum: personalExpenseAmountExpression() }
         }
       }
+    ]),
+    Settlement.aggregate([
+      { $match: payableSettlementExpenseMatch(userId, { $gte: start, $lt: end }) },
+      { $lookup: { from: "settlementallocations", localField: "_id", foreignField: "settlement", as: "allocation" } },
+      { $unwind: "$allocation" },
+      { $match: { "allocation.userId": userId } },
+      { $lookup: { from: "obligations", localField: "allocation.obligation", foreignField: "_id", as: "obligation" } },
+      { $unwind: "$obligation" },
+      { $match: payableSettlementExpenseObligationMatch(userId) },
+      { $lookup: { from: "transactions", localField: "obligation.sourceTransaction", foreignField: "_id", as: "sourceTransaction" } },
+      { $unwind: "$sourceTransaction" },
+      { $match: { "sourceTransaction.userId": userId, "sourceTransaction.category": { $ne: null } } },
+      { $group: { _id: "$sourceTransaction.category", spent: { $sum: "$allocation.amount" } } }
     ])
   ]);
 
   const spentByCategory = new Map(spending.map((item) => [String(item._id), item.spent]));
+  for (const item of settlementSpending) {
+    const key = String(item._id);
+    spentByCategory.set(key, Number(spentByCategory.get(key) || 0) + Number(item.spent || 0));
+  }
   return budgets.map((budget) => {
     const spent = spentByCategory.get(String(budget.category?._id)) || 0;
     const remaining = Number(budget.limitAmount) - spent;

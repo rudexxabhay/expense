@@ -21,7 +21,27 @@ const userSchema = new mongoose.Schema(
         enum: ["indigo", "blue", "emerald", "teal", "rose", "amber", "purple"],
         default: "indigo"
       },
-      timezone: { type: String, trim: true, default: "Asia/Kolkata" }
+      timezone: { type: String, trim: true, default: "Asia/Kolkata" },
+      notifications: {
+        pushEnabled: { type: Boolean, default: true },
+        paymentReminders: { type: Boolean, default: true },
+        receivableReminders: { type: Boolean, default: true },
+        overdueReminders: { type: Boolean, default: true },
+        settlementConfirmations: { type: Boolean, default: true },
+        recurringReminders: { type: Boolean, default: true },
+        reminderStartDaysBefore: { type: Number, min: 0, max: 30, default: 3 },
+        reminderTimes: {
+          type: [String],
+          default: ["09:00", "14:00", "19:00"],
+          validate: {
+            validator(times) {
+              return times.length <= 3 && times.every((time) => /^([01]\d|2[0-3]):[0-5]\d$/.test(time));
+            },
+            message: "Reminder times must be valid HH:mm values and limited to 3 per day"
+          }
+        },
+        preview: { type: String, enum: ["DETAILED", "PRIVATE"], default: "DETAILED" }
+      }
     }
   },
   { timestamps: true }

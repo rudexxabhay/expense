@@ -11,6 +11,9 @@ import { deliverPush } from "../services/pushService.js";
 import PushSubscription from "../models/PushSubscription.js";
 import { classifyDateState, normalizeFinanceTimeZone } from "../utils/financeRules.js";
 
+const DEFAULT_REMINDER_TIMES = ["09:00", "14:00", "19:00"];
+const MAX_DELIVERY_ATTEMPTS = 3;
+
 function localParts(date, timeZone) {
   const values = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(date);
   return Object.fromEntries(values.map((item) => [item.type, Number(item.value)]));
@@ -28,7 +31,8 @@ function fromLocal(parts, timeZone) {
 }
 
 function startOfDay(date, timeZone) {
-  return fromLocal(localParts(date, timeZone), timeZone);
+  const parts = localParts(date, timeZone);
+  return fromLocal({ ...parts, hour: 0, minute: 0, second: 0 }, timeZone);
 }
 
 function dateKey(date, timeZone) {
@@ -37,8 +41,11 @@ function dateKey(date, timeZone) {
 }
 
 function dayDiff(a, b, timeZone) {
-  const state = classifyDateState(a, b, timeZone);
-  return state === "OVERDUE" ? -1 : state === "UPCOMING" ? 1 : 0;
+  const aParts = localParts(a, timeZone);
+  const bParts = localParts(b, timeZone);
+  const aUtc = Date.UTC(aParts.year, aParts.month - 1, aParts.day);
+  const bUtc = Date.UTC(bParts.year, bParts.month - 1, bParts.day);
+  return Math.round((aUtc - bUtc) / 86_400_000);
 }
 
 function withTime(date, time, timeZone) {
@@ -53,33 +60,64 @@ function notificationText(obligation, dueDate, today, timeZone) {
   const direction = obligation.direction === "RECEIVABLE" ? "RECEIVE" : "PAY";
   const diff = dayDiff(dueDate, today, timeZone);
   const amountText = `₹${amount.toLocaleString("en-IN")}`;
-  const dateText = new Intl.DateTimeFormat("en-IN", { timeZone, day: "numeric", month: "short" }).format(dueDate);
-  const title = diff < 0 ? (direction === "RECEIVE" ? "Receivable overdue" : "Payment overdue")
-    : diff === 0 ? (direction === "RECEIVE" ? "Money expected today" : "Payment due today")
-      : direction === "RECEIVE" ? "Upcoming receivable" : "Upcoming payment";
-  const message = diff < 0
-    ? direction === "RECEIVE" ? `${amountText} from ${person} is overdue.` : `You still need to pay ${person} ${amountText}.`
+  const dateText = new Intl.DateTimeFormat("en-IN", { timeZone, day: "numeric", month: "short", year: "numeric" }).format(dueDate);
+  const relative = diff === 1 ? "tomorrow" : diff > 1 ? `in ${diff} days` : "today";
+  const title = diff < 0
+    ? direction === "RECEIVE" ? "Payment not received" : "Payment overdue"
     : diff === 0
-      ? direction === "RECEIVE" ? `You should receive ${amountText} from ${person} today.` : `You need to pay ${person} ${amountText} today.`
-      : direction === "RECEIVE" ? `You should receive ${amountText} from ${person} on ${dateText}.` : `You need to pay ${person} ${amountText} on ${dateText}.`;
-  const templateKey = diff < 0 ? `${direction}_OVERDUE` : diff === 0 ? `${direction}_DUE_TODAY` : `${direction}_UPCOMING`;
-  const type = diff < 0 ? "OVERDUE" : diff === 0 ? "DUE_TODAY" : direction === "RECEIVE" ? "TO_RECEIVE" : "TO_PAY";
+      ? direction === "RECEIVE" ? "Payment expected today" : "Payment due today"
+      : direction === "RECEIVE" ? "Payment expected soon" : "Payment due soon";
+  const message = diff < 0
+    ? direction === "RECEIVE" ? `${amountText} expected from ${person} is overdue.` : `${amountText} payment to ${person} is overdue.`
+    : diff === 0
+      ? direction === "RECEIVE" ? `${amountText} is expected from ${person} today.` : `${amountText} payment to ${person} is due today.`
+      : direction === "RECEIVE" ? `${amountText} is expected from ${person} ${relative}, on ${dateText}.` : `${amountText} payment to ${person} is due ${relative}, on ${dateText}.`;
+  const templateKey = diff < 0 ? `${direction}_OVERDUE` : diff === 0 ? `${direction}_DUE_TODAY` : `${direction}_DUE_SOON`;
+  const type = diff < 0
+    ? direction === "RECEIVE" ? "RECEIVABLE_OVERDUE" : "PAYMENT_OVERDUE"
+    : diff === 0
+      ? direction === "RECEIVE" ? "RECEIVABLE_DUE_TODAY" : "PAYMENT_DUE_TODAY"
+      : direction === "RECEIVE" ? "RECEIVABLE_DUE_SOON" : "PAYMENT_DUE_SOON";
   return { title, message, type, direction, amount, templateKey };
 }
 
 async function upsertNotification(payload) {
   const { userId, notificationKey, ...fields } = payload;
   const { deliveryStatus, scheduledFor, ...mutableFields } = fields;
+  const aliases = {
+    ...(mutableFields.transaction ? { transactionId: mutableFields.transaction, sourceTransactionId: mutableFields.transaction } : {}),
+    ...(mutableFields.obligation ? { obligationId: mutableFields.obligation } : {}),
+    body: mutableFields.message,
+    dedupeKey: mutableFields.dedupeKey || notificationKey,
+    deepLink: mutableFields.deepLink || (mutableFields.obligation ? `/obligations/${mutableFields.obligation}` : "/home")
+  };
   await Notification.updateOne(
     { userId, notificationKey },
-    { $setOnInsert: { userId, notificationKey, deliveryStatus, scheduledFor }, $set: mutableFields },
+    { $setOnInsert: { userId, notificationKey, deliveryStatus, scheduledFor }, $set: { ...mutableFields, ...aliases } },
     { upsert: true }
   );
 }
 
+function notificationPreferences(user = {}) {
+  return {
+    pushEnabled: user.preferences?.notifications?.pushEnabled !== false,
+    paymentReminders: user.preferences?.notifications?.paymentReminders !== false,
+    receivableReminders: user.preferences?.notifications?.receivableReminders !== false,
+    overdueReminders: user.preferences?.notifications?.overdueReminders !== false,
+    settlementConfirmations: user.preferences?.notifications?.settlementConfirmations !== false,
+    recurringReminders: user.preferences?.notifications?.recurringReminders !== false,
+    reminderStartDaysBefore: Number(user.preferences?.notifications?.reminderStartDaysBefore ?? 3),
+    reminderTimes: Array.isArray(user.preferences?.notifications?.reminderTimes) && user.preferences.notifications.reminderTimes.length
+      ? user.preferences.notifications.reminderTimes.slice(0, 3)
+      : DEFAULT_REMINDER_TIMES,
+    preview: user.preferences?.notifications?.preview === "PRIVATE" ? "PRIVATE" : "DETAILED"
+  };
+}
+
 export async function processDueNotifications(userId) {
-  const user = await User.findById(userId).select("preferences.timezone");
+  const user = await User.findById(userId).select("preferences");
   const timeZone = normalizeFinanceTimeZone(user?.preferences?.timezone);
+  const prefs = notificationPreferences(user);
   await ensureUserObligations(userId);
   await refreshUserObligationStatuses(userId);
   const now = new Date();
@@ -91,7 +129,7 @@ export async function processDueNotifications(userId) {
     dueDate: { $exists: true, $ne: null }
   }).populate("person", "name")
     .populate("sourceTransaction", "reminderEnabled reminderStartDaysBefore reminderTimes");
-  const reminders = items.filter((item) => item.sourceTransaction?.reminderEnabled);
+  const reminders = items;
 
   await Notification.updateMany(
     {
@@ -104,6 +142,9 @@ export async function processDueNotifications(userId) {
   );
 
   for (const item of reminders) {
+    const payable = item.direction === "PAYABLE";
+    if (payable && !prefs.paymentReminders) continue;
+    if (!payable && !prefs.receivableReminders) continue;
     await Notification.updateMany(
       {
         userId,
@@ -116,17 +157,21 @@ export async function processDueNotifications(userId) {
     );
     const dueDate = startOfDay(item.dueDate, timeZone);
     const dueParts = localParts(dueDate, timeZone);
-    const startParts = new Date(Date.UTC(dueParts.year, dueParts.month - 1, dueParts.day - Number(item.sourceTransaction?.reminderStartDaysBefore ?? 3)));
+    const startDaysBefore = Number(item.sourceTransaction?.reminderStartDaysBefore ?? prefs.reminderStartDaysBefore ?? 3);
+    const startParts = new Date(Date.UTC(dueParts.year, dueParts.month - 1, dueParts.day - startDaysBefore));
     const startDate = fromLocal({ year: startParts.getUTCFullYear(), month: startParts.getUTCMonth() + 1, day: startParts.getUTCDate(), hour: 0, minute: 0, second: 0 }, timeZone);
     if (today < startDate) continue;
 
     const text = notificationText(item, dueDate, today, timeZone);
-    const times = Array.isArray(item.sourceTransaction?.reminderTimes) && item.sourceTransaction.reminderTimes.length ? item.sourceTransaction.reminderTimes : ["09:00", "14:00", "20:00"];
+    if (text.type.endsWith("_OVERDUE") && !prefs.overdueReminders) continue;
+    const times = Array.isArray(item.sourceTransaction?.reminderTimes) && item.sourceTransaction.reminderTimes.length ? item.sourceTransaction.reminderTimes : prefs.reminderTimes;
 
     if (text.templateKey.endsWith("_OVERDUE")) {
+      const todayKey = dateKey(today, timeZone);
       await upsertNotification({
         userId,
-        notificationKey: `overdue:${item._id}:${dateKey(dueDate, timeZone)}:v${item.version}`,
+        notificationKey: `overdue:${item._id}:${todayKey}`,
+        dedupeKey: `${userId}:${item._id}:${text.type}:${todayKey}:OVERDUE`,
         transaction: item.sourceTransaction?._id,
         obligation: item._id,
         person: item.person?._id,
@@ -141,7 +186,8 @@ export async function processDueNotifications(userId) {
         reminderAt: now,
         direction: text.direction,
         deliveryStatus: "SCHEDULED",
-        scheduledFor: now
+        scheduledFor: now,
+        deepLink: `/obligations/${item._id}`
       });
       continue;
     }
@@ -159,7 +205,8 @@ export async function processDueNotifications(userId) {
       const reminderAt = now;
       await upsertNotification({
         userId,
-        notificationKey: `due-catchup:${item._id}:${dateKey(today, timeZone)}:v${item.version}`,
+        notificationKey: `due-catchup:${item._id}:${dateKey(today, timeZone)}`,
+        dedupeKey: `${userId}:${item._id}:${text.type}:${dateKey(today, timeZone)}:CATCHUP`,
         transaction: item.sourceTransaction?._id,
         obligation: item._id,
         person: item.person?._id,
@@ -174,7 +221,8 @@ export async function processDueNotifications(userId) {
         reminderAt,
         direction: text.direction,
         deliveryStatus: "SCHEDULED",
-        scheduledFor: reminderAt
+        scheduledFor: reminderAt,
+        deepLink: `/obligations/${item._id}`
       });
       continue;
     }
@@ -184,7 +232,8 @@ export async function processDueNotifications(userId) {
       if (reminderAt > now) continue;
       await upsertNotification({
         userId,
-        notificationKey: `due:${item._id}:${dateKey(today, timeZone)}:${time}:v${item.version}`,
+        notificationKey: `due:${item._id}:${dateKey(today, timeZone)}:${time}`,
+        dedupeKey: `${userId}:${item._id}:${text.type}:${dateKey(today, timeZone)}:${time}`,
         transaction: item.sourceTransaction?._id,
         obligation: item._id,
         person: item.person?._id,
@@ -199,7 +248,8 @@ export async function processDueNotifications(userId) {
         reminderAt,
         direction: text.direction,
         deliveryStatus: "SCHEDULED",
-        scheduledFor: reminderAt
+        scheduledFor: reminderAt,
+        deepLink: `/obligations/${item._id}`
       });
     }
   }
@@ -211,9 +261,27 @@ export async function processScheduledNotifications() {
     try {
       await processRecurringRules(String(id));
       await processDueNotifications(String(id));
-      const pending = await Notification.find({ userId: String(id), reminderAt: { $lte: new Date() }, status: { $nin: ["ARCHIVED", "READ"] }, $or: [{ deliveryStatus: { $in: ["SCHEDULED", "PUSH_FAILED"] } }, { deliveryStatus: "PROCESSING", updatedAt: { $lt: new Date(Date.now() - 5 * 60_000) } }] }).limit(100);
+      const now = new Date();
+      const pending = await Notification.find({
+        userId: String(id),
+        reminderAt: { $lte: now },
+        attempts: { $lt: MAX_DELIVERY_ATTEMPTS },
+        status: { $nin: ["ARCHIVED", "READ"] },
+        $and: [
+          { $or: [{ nextAttemptAt: { $exists: false } }, { nextAttemptAt: { $lte: now } }] },
+          { $or: [{ deliveryStatus: { $in: ["SCHEDULED", "QUEUED", "FAILED", "PUSH_FAILED"] } }, { deliveryStatus: "PROCESSING", updatedAt: { $lt: new Date(Date.now() - 5 * 60_000) } }] }
+        ]
+      }).limit(100);
       for (const notification of pending) {
-        const claim = await Notification.updateOne({ _id: notification._id, status: { $nin: ["ARCHIVED", "READ"] }, $or: [{ deliveryStatus: { $in: ["SCHEDULED", "PUSH_FAILED"] } }, { deliveryStatus: "PROCESSING", updatedAt: { $lt: new Date(Date.now() - 5 * 60_000) } }] }, { $set: { deliveryStatus: "PROCESSING" }, $inc: { attempts: 1 } });
+        const claim = await Notification.updateOne({
+          _id: notification._id,
+          attempts: { $lt: MAX_DELIVERY_ATTEMPTS },
+          status: { $nin: ["ARCHIVED", "READ"] },
+          $and: [
+            { $or: [{ nextAttemptAt: { $exists: false } }, { nextAttemptAt: { $lte: now } }] },
+            { $or: [{ deliveryStatus: { $in: ["SCHEDULED", "QUEUED", "FAILED", "PUSH_FAILED"] } }, { deliveryStatus: "PROCESSING", updatedAt: { $lt: new Date(Date.now() - 5 * 60_000) } }] }
+          ]
+        }, { $set: { deliveryStatus: "PROCESSING", lastAttemptAt: now }, $inc: { attempts: 1, attemptCount: 1 } });
         if (!claim.modifiedCount) continue;
         if (notification.obligation) {
           const obligation = await Obligation.findOne({ _id: notification.obligation, userId: String(id) }).populate("person", "name");
@@ -221,7 +289,7 @@ export async function processScheduledNotifications() {
             await Notification.updateOne({ _id: notification._id }, { $set: { deliveryStatus: "CANCELLED", status: "ARCHIVED" } });
             continue;
           }
-          const user = await User.findById(id).select("preferences.timezone");
+          const user = await User.findById(id).select("preferences");
           const timeZone = user?.preferences?.timezone || "Asia/Kolkata";
           const current = notificationText(obligation, obligation.dueDate || notification.dueDate, new Date(), timeZone);
           notification.title = current.title;
@@ -230,11 +298,24 @@ export async function processScheduledNotifications() {
           notification.remainingAmount = current.amount;
           notification.templateKey = current.templateKey;
           notification.personId = obligation.person?._id;
+          notification.deepLink = `/obligations/${obligation._id}`;
           await notification.save();
         }
         const outcome = await deliverPush(notification);
         const update = { $addToSet: { deliveredDevices: { $each: outcome.deliveredDeviceIds || [] } } };
-        update.$set = outcome.failed ? { deliveryStatus: "PUSH_FAILED" } : { deliveryStatus: "PUSH_SENT", sentAt: new Date() };
+        if (outcome.failed) {
+          const attempt = Number(notification.attempts || 0) + 1;
+          const exhausted = attempt >= MAX_DELIVERY_ATTEMPTS;
+          update.$set = {
+            deliveryStatus: exhausted ? "FAILED" : "PUSH_FAILED",
+            lastError: outcome.lastError || "Push delivery failed"
+          };
+          if (!exhausted) update.$set.nextAttemptAt = new Date(Date.now() + Math.min(60, 2 ** attempt) * 60_000);
+          else update.$unset = { nextAttemptAt: "" };
+        } else {
+          update.$set = { deliveryStatus: "SENT", sentAt: new Date(), lastError: "" };
+          update.$unset = { nextAttemptAt: "" };
+        }
         await Notification.updateOne({ _id: notification._id }, update);
       }
     } catch (error) {
@@ -244,12 +325,12 @@ export async function processScheduledNotifications() {
 }
 
 function filterMatch(filter) {
-  if (filter === "due_today_pay") return { type: "DUE_TODAY", direction: "PAY" };
-  if (filter === "due_today_receive") return { type: "DUE_TODAY", direction: "RECEIVE" };
-  if (filter === "upcoming_pay") return { type: "TO_PAY", direction: "PAY" };
-  if (filter === "upcoming_receive") return { type: "TO_RECEIVE", direction: "RECEIVE" };
-  if (filter === "overdue_pay") return { type: "OVERDUE", direction: "PAY" };
-  if (filter === "overdue_receive") return { type: "OVERDUE", direction: "RECEIVE" };
+  if (filter === "due_today_pay") return { type: { $in: ["DUE_TODAY", "PAYMENT_DUE_TODAY"] }, direction: "PAY" };
+  if (filter === "due_today_receive") return { type: { $in: ["DUE_TODAY", "RECEIVABLE_DUE_TODAY"] }, direction: "RECEIVE" };
+  if (filter === "upcoming_pay") return { type: { $in: ["TO_PAY", "PAYMENT_DUE_SOON", "LOAN_REPAYMENT_DUE"] }, direction: "PAY" };
+  if (filter === "upcoming_receive") return { type: { $in: ["TO_RECEIVE", "RECEIVABLE_DUE_SOON"] }, direction: "RECEIVE" };
+  if (filter === "overdue_pay") return { type: { $in: ["OVERDUE", "PAYMENT_OVERDUE"] }, direction: "PAY" };
+  if (filter === "overdue_receive") return { type: { $in: ["OVERDUE", "RECEIVABLE_OVERDUE"] }, direction: "RECEIVE" };
   if (filter === "to_receive") return { direction: "RECEIVE" };
   if (filter === "to_pay") return { direction: "PAY" };
   return {};
@@ -314,12 +395,38 @@ export const pushConfig = asyncHandler(async (req, res) => {
   successResponse(res, { publicKey: process.env.VAPID_PUBLIC_KEY || "", configured: Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT) }, "Push configuration fetched");
 });
 
+function inferPlatform(userAgent = "") {
+  const value = String(userAgent);
+  if (/iphone|ipad|ipod/i.test(value)) return "iOS PWA/Safari";
+  if (/android/i.test(value)) return "Android Chrome/PWA";
+  if (/edg/i.test(value)) return "Desktop Edge";
+  if (/chrome|chromium/i.test(value)) return "Desktop Chrome";
+  if (/safari/i.test(value)) return "Safari";
+  return "Browser";
+}
+
 export const savePushSubscription = asyncHandler(async (req, res) => {
   const subscription = req.body?.subscription;
   if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) throw new ApiError("Invalid push subscription", 400);
+  const endpoint = String(subscription.endpoint);
+  if (endpoint.length > 2048) throw new ApiError("Invalid push endpoint", 400);
+  await PushSubscription.updateMany({ endpoint, userId: { $ne: req.userId } }, { $set: { isActive: false, lastFailureAt: new Date(), lastErrorCode: "OWNER_CHANGED" } });
+  const userAgent = String(req.get("User-Agent") || "");
   const record = await PushSubscription.findOneAndUpdate(
-    { endpoint: subscription.endpoint },
-    { $set: { userId: req.userId, endpoint: subscription.endpoint, keys: subscription.keys, deviceLabel: req.body.deviceLabel || "", isActive: true, lastUsedAt: new Date() } },
+    { userId: req.userId, endpoint },
+    {
+      $set: {
+        userId: req.userId,
+        endpoint,
+        keys: { p256dh: String(subscription.keys.p256dh), auth: String(subscription.keys.auth) },
+        deviceId: req.body.deviceId || "",
+        deviceLabel: req.body.deviceLabel || userAgent.slice(0, 110),
+        deviceName: req.body.deviceName || "",
+        platform: req.body.platform || inferPlatform(userAgent),
+        isActive: true,
+        lastUsedAt: new Date()
+      }
+    },
     { upsert: true, new: true, runValidators: true }
   );
   successResponse(res, { id: record._id, isActive: record.isActive }, "Push subscription saved");
@@ -334,6 +441,61 @@ export const removePushSubscription = asyncHandler(async (req, res) => {
 export const pushStatus = asyncHandler(async (req, res) => {
   const activeDevices = await PushSubscription.countDocuments({ userId: req.userId, isActive: true });
   successResponse(res, { activeDevices, configured: Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT) }, "Push status fetched");
+});
+
+export const listPushDevices = asyncHandler(async (req, res) => {
+  const devices = await PushSubscription.find({ userId: req.userId })
+    .select("deviceId deviceLabel deviceName platform isActive createdAt updatedAt lastUsedAt lastSuccessAt lastFailureAt failureCount")
+    .sort({ isActive: -1, updatedAt: -1 });
+  successResponse(res, devices, "Notification devices fetched");
+});
+
+export const disablePushDevice = asyncHandler(async (req, res) => {
+  const device = await PushSubscription.findOneAndUpdate(
+    { _id: req.params.id, userId: req.userId },
+    { $set: { isActive: false } },
+    { new: true }
+  );
+  if (!device) throw new ApiError("Notification device not found", 404);
+  successResponse(res, device, "Notification device disabled");
+});
+
+export const getNotificationSettings = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.userId).select("preferences");
+  successResponse(res, { timezone: normalizeFinanceTimeZone(user?.preferences?.timezone), ...notificationPreferences(user) }, "Notification settings fetched");
+});
+
+export const updateNotificationSettings = asyncHandler(async (req, res) => {
+  const allowedBooleans = ["pushEnabled", "paymentReminders", "receivableReminders", "overdueReminders", "settlementConfirmations", "recurringReminders"];
+  const updates = {};
+  for (const key of allowedBooleans) {
+    if (req.body[key] !== undefined) updates[`preferences.notifications.${key}`] = Boolean(req.body[key]);
+  }
+  if (req.body.preview !== undefined) {
+    if (!["DETAILED", "PRIVATE"].includes(req.body.preview)) throw new ApiError("Invalid notification preview setting", 400);
+    updates["preferences.notifications.preview"] = req.body.preview;
+  }
+  if (req.body.reminderStartDaysBefore !== undefined) {
+    const days = Number(req.body.reminderStartDaysBefore);
+    if (!Number.isFinite(days) || days < 0 || days > 30) throw new ApiError("Invalid reminder start", 400);
+    updates["preferences.notifications.reminderStartDaysBefore"] = days;
+  }
+  if (req.body.reminderTimes !== undefined) {
+    const times = Array.isArray(req.body.reminderTimes) ? req.body.reminderTimes.slice(0, 3) : [];
+    if (!times.length || times.some((time) => !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(time)))) throw new ApiError("Invalid reminder times", 400);
+    updates["preferences.notifications.reminderTimes"] = times;
+  }
+  if (req.body.timezone !== undefined) {
+    try {
+      new Intl.DateTimeFormat("en", { timeZone: req.body.timezone });
+    } catch {
+      throw new ApiError("Invalid timezone", 400);
+    }
+    updates["preferences.timezone"] = req.body.timezone;
+  }
+  if (!Object.keys(updates).length) throw new ApiError("No notification settings provided", 400);
+  const user = await User.findByIdAndUpdate(req.userId, { $set: updates }, { new: true, runValidators: true }).select("preferences");
+  successResponse(res, { timezone: normalizeFinanceTimeZone(user?.preferences?.timezone), ...notificationPreferences(user) }, "Notification settings updated");
 });
 
 export const completeNotification = asyncHandler(async (req, res) => {

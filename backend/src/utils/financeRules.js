@@ -1,5 +1,6 @@
 export const INCOME_TYPES = ["INCOME"];
-export const PERSONAL_EXPENSE_TYPES = ["EXPENSE", "PAID_BY_SOMEONE", "SPLIT_EXPENSE"];
+export const PERSONAL_EXPENSE_TYPES = ["EXPENSE", "SPLIT_EXPENSE"];
+export const PERSONAL_EXPENSE_SETTLEMENT_SOURCE_TYPES = ["PAID_BY_SOMEONE"];
 export const RECEIVABLE_TYPES = ["LEND", "PAID_FOR_SOMEONE"];
 export const PAYABLE_TYPES = ["BORROW", "PAID_BY_SOMEONE"];
 export const SETTLEMENT_TYPES = ["REPAYMENT_RECEIVED", "REPAYMENT_PAID"];
@@ -103,7 +104,6 @@ export function accountBalanceDeltas(transaction, multiplier = 1) {
 
 export function personalExpenseValue(typeTotals = {}) {
   return Number(typeTotals.EXPENSE?.personalAmount || 0)
-    + Number(typeTotals.PAID_BY_SOMEONE?.personalAmount || 0)
     + Number(typeTotals.SPLIT_EXPENSE?.personalAmount || 0);
 }
 
@@ -160,6 +160,25 @@ export function dueDateMatch(due, timeZone = DEFAULT_FINANCE_TIME_ZONE) {
 
 export function personalExpenseAmountExpression() {
   return { $ifNull: ["$myShare", "$amount"] };
+}
+
+export function payableSettlementExpenseMatch(userId, dateRange, filters = {}) {
+  return {
+    userId,
+    status: "ACTIVE",
+    direction: { $in: ["PAYMENT", "PAID_BY_ME"] },
+    ...(dateRange ? { settlementDate: dateRange } : {}),
+    ...(filters.account ? { account: filters.account } : {}),
+    ...(filters.person ? { person: filters.person } : {})
+  };
+}
+
+export function payableSettlementExpenseObligationMatch(userId) {
+  return {
+    "obligation.userId": userId,
+    "obligation.direction": "PAYABLE",
+    "obligation.sourceType": { $in: PERSONAL_EXPENSE_SETTLEMENT_SOURCE_TYPES }
+  };
 }
 
 export function countsAsIncome(type) {

@@ -5,11 +5,30 @@ function normalizeApiBaseUrl(value) {
 
 const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
 const TOKEN_KEY = "expense_tracker_token";
+const PUSH_DEVICE_ID_KEY = "expense_tracker_push_device_id";
 const pendingRequestKeys = new Map();
 let refreshPromise = null;
 
 function newRequestKey() {
   return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function pushDeviceId() {
+  const existing = localStorage.getItem(PUSH_DEVICE_ID_KEY);
+  if (existing) return existing;
+  const next = newRequestKey();
+  localStorage.setItem(PUSH_DEVICE_ID_KEY, next);
+  return next;
+}
+
+function pushPlatform() {
+  const agent = navigator.userAgent || "";
+  if (/iphone|ipad|ipod/i.test(agent)) return "iOS PWA/Safari";
+  if (/android/i.test(agent)) return "Android Chrome/PWA";
+  if (/edg/i.test(agent)) return "Desktop Edge";
+  if (/chrome|chromium/i.test(agent)) return "Desktop Chrome";
+  if (/safari/i.test(agent)) return "Safari";
+  return "Browser";
 }
 
 function requestFingerprint(path, method, body) {
@@ -219,7 +238,11 @@ export const api = {
   notifications: (params) => request(withQuery("/notifications", params)),
   pushConfig: () => request("/notifications/push/config"),
   pushStatus: () => request("/notifications/push/status"),
-  savePushSubscription: (subscription) => request("/notifications/push/subscriptions", { method: "POST", body: JSON.stringify({ subscription, deviceLabel: navigator.userAgent.slice(0, 110) }) }),
+  pushDevices: () => request("/notifications/push/devices"),
+  disablePushDevice: (id) => request(`/notifications/push/devices/${id}`, { method: "DELETE" }),
+  notificationSettings: () => request("/notifications/settings"),
+  updateNotificationSettings: (settings) => request("/notifications/settings", { method: "PATCH", body: JSON.stringify(settings) }),
+  savePushSubscription: (subscription) => request("/notifications/push/subscriptions", { method: "POST", body: JSON.stringify({ subscription, deviceId: pushDeviceId(), deviceLabel: navigator.userAgent.slice(0, 110), platform: pushPlatform() }) }),
   removePushSubscription: (subscription) => request("/notifications/push/subscriptions", { method: "DELETE", body: JSON.stringify({ endpoint: subscription.endpoint }) }),
   markNotificationRead: (id) =>
     request(`/notifications/${id}/read`, {

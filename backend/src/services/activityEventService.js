@@ -119,11 +119,12 @@ export async function recordTransactionAuditActivity({ transaction, audit, actio
 export async function recordSettlementActivity({ obligation, settlement, allocation, statusBefore, remainingBefore, userId, session }) {
   const paid = obligation.direction === "PAYABLE";
   const amount = Number(allocation.amount || 0);
+  const recognizesPersonalExpense = obligation.sourceType === "PAID_BY_SOMEONE";
   await insertActivityEvent({
     userId,
     eventKey: `settlement:${settlement._id}:allocation:${allocation._id}`,
     eventType: "SETTLEMENT_ALLOCATED",
-    systemLabel: paid ? "Loan Repayment" : "Payment Received",
+    systemLabel: paid ? recognizesPersonalExpense ? "Payment Made" : "Loan Repayment" : "Payment Received",
     rootTransaction: obligation.sourceTransaction,
     obligation: obligation._id,
     settlement: settlement._id,
@@ -147,6 +148,9 @@ export async function recordSettlementActivity({ obligation, settlement, allocat
     metadata: {
       sourceType: obligation.sourceType,
       settlementDirection: settlement.direction,
+      cashImpact: paid ? -amount : amount,
+      expenseImpact: recognizesPersonalExpense ? amount : 0,
+      incomeImpact: 0,
       requestKey: settlement.requestKey
     },
     createdBy: settlement.createdBy || userId

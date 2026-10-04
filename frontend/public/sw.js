@@ -33,21 +33,38 @@ self.addEventListener("fetch", (event) => {
 self.addEventListener("push", (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data?.text() || "You have a new reminder." }; }
-  event.waitUntil(self.registration.showNotification(data.title || "Expense reminder", {
-    body: data.body || "Open the app to review your reminder.",
-    icon: "/icons/icon.svg",
-    badge: "/icons/icon.svg",
-    tag: data.notificationId || undefined,
-    data: { url: data.url || "/home", notificationId: data.notificationId || "" }
-  }));
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(data.title || "Expense reminder", {
+      body: data.body || "Open the app to review your reminder.",
+      icon: data.icon || "/icons/icon.svg",
+      badge: data.badge || "/icons/icon.svg",
+      tag: data.tag || data.notificationId || undefined,
+      renotify: false,
+      data: {
+        url: data.deepLink || data.url || "/home",
+        notificationId: data.notificationId || "",
+        type: data.type || "",
+        obligationId: data.obligationId || "",
+        sourceTransactionId: data.sourceTransactionId || ""
+      }
+    }),
+    self.registration.setAppBadge ? self.registration.setAppBadge(1).catch(() => undefined) : Promise.resolve()
+  ]));
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = new URL(event.notification.data?.url || "/home", self.location.origin).href;
-  event.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
-    const existing = clients.find((client) => new URL(client.url).origin === self.location.origin);
-    if (existing) return existing.navigate(url).then((client) => client?.focus());
-    return self.clients.openWindow(url);
-  }));
+  const notificationId = event.notification.data?.notificationId;
+  const targetUrl = new URL(event.notification.data?.url || "/home", self.location.origin);
+  if (notificationId) targetUrl.searchParams.set("notificationId", notificationId);
+  const url = targetUrl.href;
+  event.waitUntil(Promise.all([
+    notificationId ? fetch(`/api/notifications/${notificationId}/read`, { method: "PATCH", credentials: "include" }).catch(() => undefined) : Promise.resolve(),
+    self.registration.clearAppBadge ? self.registration.clearAppBadge().catch(() => undefined) : Promise.resolve(),
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      const existing = clients.find((client) => new URL(client.url).origin === self.location.origin);
+      if (existing) return existing.navigate(url).then((client) => client?.focus());
+      return self.clients.openWindow(url);
+    })
+  ]));
 });

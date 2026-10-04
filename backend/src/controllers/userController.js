@@ -41,7 +41,8 @@ export const updatePreferences = asyncHandler(async (req, res) => {
       avatarColor: user.avatarColor,
       preferences: {
         theme: user.preferences?.theme,
-        timezone: user.preferences?.timezone
+        timezone: user.preferences?.timezone,
+        notifications: user.preferences?.notifications
       }
     },
     "Preferences updated"

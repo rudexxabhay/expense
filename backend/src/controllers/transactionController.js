@@ -33,6 +33,8 @@ import {
   dueDateMatch,
   incomeValue,
   normalizeFinanceTimeZone,
+  payableSettlementExpenseMatch,
+  payableSettlementExpenseObligationMatch,
   personalExpenseAmountExpression,
   personalExpenseValue,
   summarizeOutstandingByType
@@ -80,11 +82,11 @@ function normalizeTransactionPayload(body, userId) {
     transactionTime: body.transactionTime,
     dueDate: body.dueDate || undefined,
     status: body.status || "ACTIVE",
-    reminderEnabled: Boolean(body.reminderEnabled),
+    reminderEnabled: Boolean(body.reminderEnabled ?? (LOAN_TYPES.includes(type) && body.dueDate)),
     reminderStartDaysBefore: Number(body.reminderStartDaysBefore ?? 3),
     reminderTimes: Array.isArray(body.reminderTimes) && body.reminderTimes.length
       ? body.reminderTimes.slice(0, 3)
-      : ["09:00", "14:00", "20:00"]
+      : ["09:00", "14:00", "19:00"]
   };
 
   if (LOAN_TYPES.includes(type)) {
@@ -459,6 +461,42 @@ function settlementSum(userId, directions, dateRange, filters = {}) {
   ]).then((rows) => Number(rows[0]?.total || 0));
 }
 
+function payableSettlementExpensePipeline(userId, dateRange, filters = {}, groupStage = { _id: null }) {
+  return [
+    { $match: payableSettlementExpenseMatch(userId, dateRange, filters) },
+    { $lookup: { from: "settlementallocations", localField: "_id", foreignField: "settlement", as: "allocation" } },
+    { $unwind: "$allocation" },
+    { $match: { "allocation.userId": userId } },
+    { $lookup: { from: "obligations", localField: "allocation.obligation", foreignField: "_id", as: "obligation" } },
+    { $unwind: "$obligation" },
+    { $match: payableSettlementExpenseObligationMatch(userId) },
+    { $lookup: { from: "transactions", localField: "obligation.sourceTransaction", foreignField: "_id", as: "sourceTransaction" } },
+    { $unwind: { path: "$sourceTransaction", preserveNullAndEmptyArrays: true } },
+    { $match: { $or: [{ "sourceTransaction._id": { $exists: false } }, { "sourceTransaction.userId": userId }] } },
+    { $group: { ...groupStage, total: { $sum: "$allocation.amount" }, count: { $sum: 1 } } }
+  ];
+}
+
+function payableSettlementExpenseSum(userId, dateRange, filters = {}) {
+  return Settlement.aggregate(payableSettlementExpensePipeline(userId, dateRange, filters))
+    .then((rows) => Number(rows[0]?.total || 0));
+}
+
+function mergeSeries(...series) {
+  const map = new Map();
+  for (const rows of series) {
+    for (const row of rows) {
+      const key = typeof row._id === "object" ? JSON.stringify(row._id) : String(row._id);
+      const current = map.get(key) || { ...row, income: 0, expense: 0, total: 0 };
+      current.income += Number(row.income || 0);
+      current.expense += Number(row.expense || row.total || 0);
+      current.total += Number(row.total || 0);
+      map.set(key, current);
+    }
+  }
+  return [...map.values()].sort((a, b) => String(a._id).localeCompare(String(b._id)));
+}
+
 export const getTransactionReports = asyncHandler(async (req, res) => {
   await ensureUserObligations(req.userId);
   await refreshUserObligationStatuses(req.userId);
@@ -476,9 +514,13 @@ export const getTransactionReports = asyncHandler(async (req, res) => {
     lent,
     settlementsReceived,
     settlementsPaid,
+    settlementPersonalExpense,
     categorySpending,
+    settlementCategorySpending,
     cashFlow,
-    monthlyTrend
+    settlementCashFlow,
+    monthlyTrend,
+    settlementMonthlyTrend
   ] = await Promise.all([
     sumByMatch({ ...match, type: { $in: INCOME_TYPES } }),
     sumByMatch({ ...match, type: { $in: PERSONAL_EXPENSE_TYPES } }, personalExpenseAmountExpression()),
@@ -496,6 +538,7 @@ export const getTransactionReports = asyncHandler(async (req, res) => {
     sumByMatch({ ...match, type: { $in: RECEIVABLE_TYPES } }),
     settlementSum(req.userId, ["RECEIPT", "RECEIVED_BY_ME"], match.transactionDate, match),
     settlementSum(req.userId, ["PAYMENT", "PAID_BY_ME"], match.transactionDate, match),
+    payableSettlementExpenseSum(req.userId, match.transactionDate, match),
     Transaction.aggregate([
       { $match: { ...match, type: { $in: PERSONAL_EXPENSE_TYPES } } },
       {
@@ -505,6 +548,23 @@ export const getTransactionReports = asyncHandler(async (req, res) => {
           count: { $sum: 1 }
         }
       },
+      { $sort: { total: -1 } },
+      { $limit: 8 },
+      { $lookup: { from: "categories", localField: "_id", foreignField: "_id", as: "category" } },
+      { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 0,
+          categoryId: "$_id",
+          name: { $ifNull: ["$category.name", "Uncategorized"] },
+          color: { $ifNull: ["$category.color", "coral"] },
+          total: 1,
+          count: 1
+        }
+      }
+    ]),
+    Settlement.aggregate([
+      ...payableSettlementExpensePipeline(req.userId, match.transactionDate, match, { _id: "$sourceTransaction.category" }),
       { $sort: { total: -1 } },
       { $limit: 8 },
       { $lookup: { from: "categories", localField: "_id", foreignField: "_id", as: "category" } },
@@ -535,6 +595,13 @@ export const getTransactionReports = asyncHandler(async (req, res) => {
       },
       { $sort: { _id: 1 } }
     ]),
+    Settlement.aggregate([
+      ...payableSettlementExpensePipeline(req.userId, match.transactionDate, match, {
+        _id: { $dateToString: { date: "$settlementDate", format: "%Y-%m-%d" } }
+      }),
+      { $project: { _id: 1, income: { $literal: 0 }, expense: "$total" } },
+      { $sort: { _id: 1 } }
+    ]),
     Transaction.aggregate([
       {
         $match: {
@@ -556,17 +623,33 @@ export const getTransactionReports = asyncHandler(async (req, res) => {
       },
       { $sort: { "_id.month": 1 } },
       { $project: { _id: 0, month: "$_id.month", income: 1, expense: 1 } }
+    ]),
+    Settlement.aggregate([
+      ...payableSettlementExpensePipeline(req.userId, { $gte: trendStart, $lt: trendEnd }, match, {
+        _id: { month: { $month: "$settlementDate" } }
+      }),
+      { $sort: { "_id.month": 1 } },
+      { $project: { _id: 0, month: "$_id.month", income: { $literal: 0 }, expense: "$total" } }
     ])
   ]);
 
   const outstandingTotals = summarizeOutstandingByType(outstanding);
+  const totalPersonalExpense = Number(personalExpense || 0) + Number(settlementPersonalExpense || 0);
+  const categoryTotals = [...categorySpending, ...settlementCategorySpending].reduce((map, row) => {
+    const key = String(row.categoryId || "uncategorized");
+    const current = map.get(key) || { ...row, total: 0, count: 0 };
+    current.total += Number(row.total || 0);
+    current.count += Number(row.count || 0);
+    map.set(key, current);
+    return map;
+  }, new Map());
 
   successResponse(
     res,
     {
       totals: {
         income,
-        personalExpense,
+        personalExpense: totalPersonalExpense,
         toReceive: outstandingTotals.totalToReceive,
         toPay: outstandingTotals.totalToPay,
         lentOutstanding: outstandingTotals.lentOutstanding,
@@ -578,9 +661,13 @@ export const getTransactionReports = asyncHandler(async (req, res) => {
         settlements: settlementsReceived + settlementsPaid,
         settlementReceived: settlementsReceived,
         settlementPaid: settlementsPaid,
-        savings: income - personalExpense
+        savings: income - totalPersonalExpense
       },
-      charts: { cashFlow, categorySpending, monthlyTrend },
+      charts: {
+        cashFlow: mergeSeries(cashFlow, settlementCashFlow),
+        categorySpending: [...categoryTotals.values()].sort((a, b) => Number(b.total || 0) - Number(a.total || 0)).slice(0, 8),
+        monthlyTrend: mergeSeries(monthlyTrend.map((row) => ({ _id: row.month, ...row })), settlementMonthlyTrend.map((row) => ({ _id: row.month, ...row }))).map((row) => ({ month: row.month ?? Number(row._id), income: row.income, expense: row.expense }))
+      },
       reportTypes: REPORT_TYPES
     },
     "Transaction reports fetched"
@@ -832,8 +919,8 @@ export const getTransactionSummary = asyncHandler(async (req, res) => {
       year: req.query.year || now.getFullYear()
     });
   const periodMatch = { userId: req.userId, status: "ACTIVE", ...(dateRange ? { transactionDate: dateRange } : {}) };
-  const [accounts, periodTotals, personOutstanding, peopleOutstanding, currentObligations, periodSettlements, allTimeSettlements] = await Promise.all([
-    Account.find({ userId: req.userId, isActive: true }),
+  const [accounts, periodTotals, personOutstanding, peopleOutstanding, currentObligations, periodSettlements, allTimeSettlements, settlementPersonalExpense] = await Promise.all([
+    Account.find({ userId: req.userId, isActive: true, type: { $in: ["CASH", "BANK", "WALLET"] } }),
     Transaction.aggregate([
       {
         $match: {
@@ -947,7 +1034,8 @@ export const getTransactionSummary = asyncHandler(async (req, res) => {
     Settlement.aggregate([
       { $match: { userId: req.userId, status: "ACTIVE", direction: { $in: ["PAYMENT", "RECEIPT", "PAID_BY_ME", "RECEIVED_BY_ME"] } } },
       { $group: { _id: null, total: { $sum: { $ifNull: ["$totalAmount", "$amount"] } } } }
-    ])
+    ]),
+    payableSettlementExpenseSum(req.userId, dateRange, periodMatch)
   ]);
 
   const byType = periodTotals.reduce((acc, item) => ({ ...acc, [item._id]: item }), {});
@@ -972,7 +1060,7 @@ export const getTransactionSummary = asyncHandler(async (req, res) => {
     dueTotals[`${key}Count`] = Number(dueTotals[`${key}Count`] || 0) + 1;
   });
   const settledAllTime = Number(allTimeSettlements[0]?.total || 0);
-  const personalExpense = personalExpenseValue(byType);
+  const personalExpense = Number(personalExpenseValue(byType) || 0) + Number(settlementPersonalExpense || 0);
   const settlementTotals = periodSettlements.reduce((totals, item) => {
     if (["RECEIPT", "RECEIVED_BY_ME"].includes(item._id)) totals.received += Number(item.total || 0);
     if (["PAYMENT", "PAID_BY_ME"].includes(item._id)) totals.paid += Number(item.total || 0);

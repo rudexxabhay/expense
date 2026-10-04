@@ -260,7 +260,13 @@ export const createSettlement = asyncHandler(async (req, res) => {
         const allocation = await SettlementAllocation.findOne({ userId: req.userId, settlement: created._id, obligation: obligation._id }).session(session);
         await recordSettlementActivity({ obligation, settlement: created, allocation, statusBefore, remainingBefore, userId: req.userId, session });
         await Notification.updateMany(
-          { userId: req.userId, obligation: obligation._id, status: { $ne: "ARCHIVED" } },
+          {
+            userId: req.userId,
+            obligation: obligation._id,
+            status: "UNREAD",
+            deliveryStatus: { $in: ["SCHEDULED", "QUEUED", "PROCESSING", "PUSH_FAILED", "FAILED"] },
+            reminderAt: { $gte: now }
+          },
           { $set: { status: "ARCHIVED", deliveryStatus: "CANCELLED" } },
           { session }
         );
@@ -339,7 +345,13 @@ export const cancelSettlement = asyncHandler(async (req, res) => {
           createdBy: req.userId
         }], { session });
         await recordSettlementReversalActivity({ obligation, settlement, allocation, statusBefore: old.status, remainingBefore: old.remaining, userId: req.userId, session });
-        await Notification.updateMany({ userId: req.userId, obligation: obligation._id, status: { $ne: "ARCHIVED" } }, { status: "ARCHIVED" }, { session });
+        await Notification.updateMany({
+          userId: req.userId,
+          obligation: obligation._id,
+          status: "UNREAD",
+          deliveryStatus: { $in: ["SCHEDULED", "QUEUED", "PROCESSING", "PUSH_FAILED", "FAILED"] },
+          reminderAt: { $gte: new Date() }
+        }, { $set: { status: "ARCHIVED", deliveryStatus: "CANCELLED" } }, { session });
       }
       await FinancialRequest.create([{ userId: req.userId, requestKey: key, payloadHash: hash, transactionIds: [], createdBy: req.userId }], { session });
       cancelled = settlement;

@@ -24,6 +24,8 @@ import {
   dueDateMatch,
   isPayable,
   isReceivable,
+  payableSettlementExpenseMatch,
+  payableSettlementExpenseObligationMatch,
   personalExpenseAmount,
   summarizeOutstandingByType
 } from "../utils/financeRules.js";
@@ -243,6 +245,22 @@ function totals(transactions) {
   }, { income: 0, expense: 0, toReceive: 0, toPay: 0, borrowed: 0, lent: 0, settlements: 0, receivedBack: 0, paidBack: 0, savings: 0 });
 }
 
+function payableSettlementExpenseTotal(userId, dateRange, filters = {}) {
+  return Settlement.aggregate([
+    { $match: payableSettlementExpenseMatch(userId, dateRange, filters) },
+    { $lookup: { from: "settlementallocations", localField: "_id", foreignField: "settlement", as: "allocation" } },
+    { $unwind: "$allocation" },
+    { $match: { "allocation.userId": userId } },
+    { $lookup: { from: "obligations", localField: "allocation.obligation", foreignField: "_id", as: "obligation" } },
+    { $unwind: "$obligation" },
+    { $match: payableSettlementExpenseObligationMatch(userId) },
+    { $lookup: { from: "transactions", localField: "obligation.sourceTransaction", foreignField: "_id", as: "sourceTransaction" } },
+    { $unwind: { path: "$sourceTransaction", preserveNullAndEmptyArrays: true } },
+    { $match: { $or: [{ "sourceTransaction._id": { $exists: false } }, { "sourceTransaction.userId": userId }] } },
+    { $group: { _id: null, total: { $sum: "$allocation.amount" } } }
+  ]).then((rows) => Number(rows[0]?.total || 0));
+}
+
 function filterLines(query) {
   return Object.entries(query)
     .filter(([, value]) => value !== undefined && value !== null && value !== "")
@@ -308,6 +326,7 @@ async function reportData(req) {
   totalRows.receivedBack = settlementTotals.filter((item) => ["RECEIPT", "RECEIVED_BY_ME"].includes(item._id)).reduce((sum, item) => sum + item.total, 0);
   totalRows.paidBack = settlementTotals.filter((item) => ["PAYMENT", "PAID_BY_ME"].includes(item._id)).reduce((sum, item) => sum + item.total, 0);
   totalRows.settlements = totalRows.receivedBack + totalRows.paidBack;
+  totalRows.expense += await payableSettlementExpenseTotal(req.userId, settlementDateRange, filters);
   totalRows.savings = totalRows.income - totalRows.expense;
   const [people, accounts] = await Promise.all([
     Person.find({ userId: req.userId, isActive: true }).sort({ name: 1 }),

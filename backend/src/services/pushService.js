@@ -1,7 +1,9 @@
 import { createCipheriv, createECDH, createHmac, createPrivateKey, randomBytes, sign } from "node:crypto";
 import https from "node:https";
 import { URL } from "node:url";
+import PushDeliveryAttempt from "../models/PushDeliveryAttempt.js";
 import PushSubscription from "../models/PushSubscription.js";
+import User from "../models/User.js";
 
 const decode = (value) => Buffer.from(value.replace(/-/g, "+").replace(/_/g, "/"), "base64");
 const encode = (value) => Buffer.from(value).toString("base64url");
@@ -58,15 +60,36 @@ function sendRequest(endpoint, headers, body) {
 }
 
 export async function deliverPush(notification) {
-  if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY || !process.env.VAPID_SUBJECT) return { sent: 0, failed: 1, deliveredDeviceIds: [] };
+  if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY || !process.env.VAPID_SUBJECT) return { sent: 0, failed: 1, deliveredDeviceIds: [], lastError: "VAPID is not configured" };
+  const user = await User.findById(notification.userId).select("preferences.notifications");
+  if (user?.preferences?.notifications?.pushEnabled === false) return { sent: 0, failed: 0, deliveredDeviceIds: [] };
   const subscriptions = await PushSubscription.find({ userId: notification.userId, isActive: true });
   const alreadyDelivered = new Set((notification.deliveredDevices || []).map(String));
-  const payload = JSON.stringify({ title: notification.title, body: notification.message, notificationId: String(notification._id), obligationId: notification.obligation ? String(notification.obligation) : "", personId: notification.personId ? String(notification.personId) : "", url: notification.obligation ? `/obligations/${notification.obligation}` : "/home" });
+  const privatePreview = user?.preferences?.notifications?.preview === "PRIVATE";
+  const title = privatePreview ? "Expense reminder" : notification.title;
+  const body = privatePreview ? "You have a financial reminder." : (notification.body || notification.message);
+  const deepLink = notification.deepLink || (notification.obligation ? `/obligations/${notification.obligation}` : "/home");
+  const payload = JSON.stringify({
+    title,
+    body,
+    icon: "/icons/icon.svg",
+    badge: "/icons/icon.svg",
+    tag: notification.obligation ? `obligation-${notification.obligation}-${notification.type}` : `notification-${notification._id}`,
+    notificationId: String(notification._id),
+    type: notification.type,
+    obligationId: notification.obligation ? String(notification.obligation) : "",
+    sourceTransactionId: notification.sourceTransactionId ? String(notification.sourceTransactionId) : notification.transaction ? String(notification.transaction) : "",
+    personId: notification.personId ? String(notification.personId) : "",
+    deepLink,
+    url: deepLink
+  });
   let sent = 0;
   let failed = 0;
+  let lastError = "";
   const deliveredDeviceIds = [];
   await Promise.all(subscriptions.map(async (record) => {
     if (alreadyDelivered.has(String(record._id))) return;
+    const attempt = Number(notification.attempts || 0) + 1;
     try {
       const encrypted = encryptPayload(record, payload);
       const status = await sendRequest(record.endpoint, {
@@ -75,16 +98,38 @@ export async function deliverPush(notification) {
       }, encrypted.body);
       if (status === 404 || status === 410) {
         record.isActive = false;
+        record.lastFailureAt = new Date();
+        record.lastErrorCode = String(status);
+        record.failureCount = Number(record.failureCount || 0) + 1;
         await record.save();
+        await PushDeliveryAttempt.create({ userId: notification.userId, notification: notification._id, subscription: record._id, attempt, status: "DISABLED", errorCode: String(status), errorMessage: "Push subscription expired or is gone" });
       } else if (status >= 200 && status < 300) {
         record.lastUsedAt = new Date();
+        record.lastSuccessAt = new Date();
+        record.failureCount = 0;
+        record.lastErrorCode = "";
         await record.save();
         sent += 1;
         deliveredDeviceIds.push(record._id);
-      } else failed += 1;
-    } catch {
+        await PushDeliveryAttempt.create({ userId: notification.userId, notification: notification._id, subscription: record._id, attempt, status: "SENT", sentAt: new Date() });
+      } else {
+        failed += 1;
+        lastError = `Push provider returned ${status}`;
+        record.lastFailureAt = new Date();
+        record.lastErrorCode = String(status);
+        record.failureCount = Number(record.failureCount || 0) + 1;
+        await record.save();
+        await PushDeliveryAttempt.create({ userId: notification.userId, notification: notification._id, subscription: record._id, attempt, status: "FAILED", errorCode: String(status), errorMessage: lastError });
+      }
+    } catch (error) {
       failed += 1;
+      lastError = error.message || "Push delivery failed";
+      record.lastFailureAt = new Date();
+      record.lastErrorCode = error.code || "PUSH_ERROR";
+      record.failureCount = Number(record.failureCount || 0) + 1;
+      await record.save();
+      await PushDeliveryAttempt.create({ userId: notification.userId, notification: notification._id, subscription: record._id, attempt, status: "FAILED", errorCode: record.lastErrorCode, errorMessage: lastError });
     }
   }));
-  return { sent, failed: failed || (subscriptions.length === 0 ? 1 : 0), deliveredDeviceIds };
+  return { sent, failed: failed || (subscriptions.length === 0 ? 1 : 0), deliveredDeviceIds, lastError: lastError || (subscriptions.length === 0 ? "No active push subscriptions" : "") };
 }

@@ -20,7 +20,11 @@
   --sidebar-width: 5.5rem;
   --header-action-size: 2.75rem;
   --card-padding: 1rem;
-  --mobile-bottom-nav-height: 4.875rem;
+  --app-background: #f8f5ef;
+  --app-background-gradient:
+    radial-gradient(circle at 10% 0%, rgb(var(--color-primary) / 0.07), transparent 24rem),
+    linear-gradient(180deg, #fbf8f3 0%, #f8f5ef 44%, #f7f2ea 100%);
+  --mobile-bottom-nav-height: 5.75rem;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -29,6 +33,16 @@
 
 html {
   font-size: var(--app-root-font-size);
+  width: 100%;
+  min-height: 100%;
+  background: var(--app-background);
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
 }
 
 * {
@@ -38,12 +52,9 @@ html {
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
-  background:
-    radial-gradient(circle at 10% 0%, rgb(var(--color-primary) / 0.07), transparent 24rem),
-    linear-gradient(180deg, #fbf8f3 0%, #f8f5ef 44%, #f7f2ea 100%);
+  min-height: 100dvh;
+  background: var(--app-background-gradient);
   overscroll-behavior-y: none;
-  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .obligation-detail-content {
@@ -54,8 +65,23 @@ body {
   bottom: calc(var(--mobile-bottom-nav-height) + env(safe-area-inset-bottom, 0px) + 0.5rem);
 }
 
+.app-shell {
+  min-height: 100dvh;
+  background: var(--app-background-gradient);
+}
+
+.app-main {
+  min-height: 100dvh;
+}
+
+.app-main-mobile-spacing {
+  padding-bottom: calc(var(--mobile-bottom-nav-height) + env(safe-area-inset-bottom, 0px) + 1rem);
+}
+
 .safe-area-bottom-nav {
-  bottom: env(safe-area-inset-bottom, 0px);
+  bottom: 0;
+  padding: 0.5rem 1.25rem calc(0.5rem + env(safe-area-inset-bottom, 0px));
+  background: var(--app-background);
 }
 
 .home-dashboard-panel {

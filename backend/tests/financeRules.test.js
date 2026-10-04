@@ -16,7 +16,7 @@ import {
 test("income and personal expense classifications stay separate from loans and transfers", () => {
   assert.equal(countsAsIncome("INCOME"), true);
   assert.equal(countsAsPersonalExpense("EXPENSE"), true);
-  assert.equal(countsAsPersonalExpense("PAID_BY_SOMEONE"), true);
+  assert.equal(countsAsPersonalExpense("PAID_BY_SOMEONE"), false);
   assert.equal(countsAsPersonalExpense("SPLIT_EXPENSE"), true);
 
   assert.equal(countsAsIncome("BORROW"), false);
@@ -42,6 +42,7 @@ test("account effects and personal expense shares follow the accounting contract
   ]);
   assert.equal(personalExpenseAmount({ type: "SPLIT_EXPENSE", amount: 90, myShare: 30 }), 30);
   assert.equal(personalExpenseAmount({ type: "PAID_FOR_SOMEONE", amount: 20 }), 0);
+  assert.equal(personalExpenseAmount({ type: "PAID_BY_SOMEONE", amount: 20 }), 0);
 });
 
 test("outstanding summaries combine split shares only into receivables", () => {

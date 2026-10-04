@@ -339,6 +339,12 @@ function App() {
 
   const handleLogout = async () => {
     try {
+      const registration = await navigator.serviceWorker?.getRegistration?.("/");
+      const subscription = await registration?.pushManager?.getSubscription?.();
+      if (subscription) {
+        await api.removePushSubscription(subscription.toJSON()).catch(() => undefined);
+        await subscription.unsubscribe().catch(() => undefined);
+      }
       await api.logout();
     } catch (err) {
       // Local logout still clears the session if the token is already invalid.
@@ -372,6 +378,15 @@ function App() {
 
   useEffect(() => {
     if (!authUser) return;
+    const notificationId = new URLSearchParams(window.location.search).get("notificationId");
+    if (notificationId) {
+      api.markNotificationRead(notificationId).catch(() => undefined).finally(() => {
+        const params = new URLSearchParams(window.location.search);
+        params.delete("notificationId");
+        const query = params.toString();
+        window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+      });
+    }
     const legacyLedgerMatch = path.match(/^\/(?:people\/([^/]+)\/(?:ledger|personal-ledger)|person\/([^/]+)\/ledger|personal-ledger(?:\/([^/]+))?|person-ledger(?:\/([^/]+))?)\/?$/);
     if (legacyLedgerMatch) {
       const searchParams = new URLSearchParams(window.location.search);
@@ -500,12 +515,12 @@ function App() {
     : navigationItems.find((item) => item.id === screen)?.label || "Dashboard";
 
   return (
-    <div className="app-shell min-h-screen text-charcoal md:grid md:grid-cols-[5.5rem_minmax(0,1fr)] xl:grid-cols-[13.5rem_minmax(0,1fr)]">
+    <div className="app-shell text-charcoal md:grid md:grid-cols-[5.5rem_minmax(0,1fr)] xl:grid-cols-[13.5rem_minmax(0,1fr)]">
       <ResponsiveSidebar activeTab={activeTab} activeManager={activeManager} onNavigate={handleNavigate} onAdd={() => setSheetOpen(true)} />
       <div className="min-w-0 md:min-h-screen">
         <DesktopTopHeader title={pageTitle} user={authUser} onAdd={() => setSheetOpen(true)} onLogout={handleLogout} onThemeChange={handleThemeChange} onNavigate={handleNavigate} locationKey={`${path}:${screen}`} refreshKey={transactionVersion} />
         {!online && <OfflineBanner />}
-        <main className={`mx-auto min-h-screen w-full bg-paper shadow-[0_0_60px_rgba(55,42,82,0.08)] md:max-w-none md:bg-transparent md:px-5 md:pt-3 md:shadow-none lg:px-6 xl:max-w-[1560px] xl:px-8 ${screen === "obligation-detail" ? "pb-0 md:pb-10" : "pb-28 md:pb-10"}`}>
+        <main className={`app-main mx-auto w-full bg-paper shadow-[0_0_60px_rgba(55,42,82,0.08)] md:max-w-none md:bg-transparent md:px-5 md:pt-3 md:shadow-none lg:px-6 xl:max-w-[1560px] xl:px-8 ${screen === "obligation-detail" ? "pb-0 md:pb-10" : "app-main-mobile-spacing md:pb-10"}`}>
         {screen === "home" && <HomeDashboard refreshKey={transactionVersion} user={authUser} onLogout={handleLogout} onThemeChange={handleThemeChange} onNavigate={handleNavigate} locationKey={`${path}:${screen}`} onNavigateToSettlements={(view = "all", source = "", period = {}) => {
           const params = new URLSearchParams({ ...(view && view !== "all" ? { view } : {}), ...(source ? { source } : {}), ...period });
           const queryString = params.toString();
@@ -1015,8 +1030,6 @@ function ThemePicker({ onSelect, inline = false }) {
 function NotificationBell({ locationKey, refreshKey = 0 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("all");
-  const [draftFilter, setDraftFilter] = useState("all");
-  const [filterOpen, setFilterOpen] = useState(false);
   const [settlementAccounts, setSettlementAccounts] = useState({});
   const [data, setData] = useState({ notifications: [], unreadCount: 0 });
   const [loading, setLoading] = useState(false);
@@ -1024,8 +1037,9 @@ function NotificationBell({ locationKey, refreshKey = 0 }) {
   const [pushState, setPushState] = useState("");
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
+  const [settings, setSettings] = useState(null);
+  const [devices, setDevices] = useState([]);
   const ref = useRef(null);
-  const filterButtonRef = useRef(null);
   const accounts = useResource("accounts", {}, open ? 1 : 0);
 
   useDismissablePopup({ open, onClose: () => setOpen(false), refs: [ref], closeKey: locationKey });
@@ -1061,6 +1075,8 @@ function NotificationBell({ locationKey, refreshKey = 0 }) {
   useEffect(() => {
     if (!open) return;
     api.pushStatus().then((status) => setPushEnabled(status.activeDevices > 0)).catch(() => {});
+    api.notificationSettings().then(setSettings).catch(() => {});
+    api.pushDevices().then(setDevices).catch(() => {});
   }, [open]);
 
   const filters = [
@@ -1082,6 +1098,10 @@ function NotificationBell({ locationKey, refreshKey = 0 }) {
     try {
       if (!("serviceWorker" in navigator) || !("PushManager" in window)) throw new Error("Push notifications are not supported by this browser.");
       if (typeof Notification === "undefined") throw new Error("Push notifications are not supported by this browser.");
+      const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent || "");
+      const isStandalone = window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+      if (isIos && !isStandalone) throw new Error("Install this app on your Home Screen to enable push notifications.");
+      if (Notification.permission === "denied") throw new Error("Notifications are blocked. Re-enable them from your browser or system settings.");
       const permission = await Notification.requestPermission();
       if (permission !== "granted") throw new Error("Notifications are blocked in your browser settings. In-app reminders will still be available.");
       const config = await api.pushConfig();
@@ -1091,6 +1111,9 @@ function NotificationBell({ locationKey, refreshKey = 0 }) {
       const subscription = existing || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodeVapidKey(config.publicKey) });
       await api.savePushSubscription(subscription.toJSON());
       setPushEnabled(true);
+      await api.updateNotificationSettings({ pushEnabled: true });
+      setSettings((current) => current ? { ...current, pushEnabled: true } : current);
+      api.pushDevices().then(setDevices).catch(() => {});
       setPushState("Push notifications are enabled on this device.");
     } catch (err) {
       setPushState(err.message || "Unable to enable push notifications.");
@@ -1107,10 +1130,194 @@ function NotificationBell({ locationKey, refreshKey = 0 }) {
         await subscription.unsubscribe();
       }
       setPushEnabled(false);
+      await api.updateNotificationSettings({ pushEnabled: false }).catch(() => {});
+      setSettings((current) => current ? { ...current, pushEnabled: false } : current);
+      api.pushDevices().then(setDevices).catch(() => {});
       setPushState("Push notifications are off on this device. In-app reminders remain available.");
     } catch (err) { setPushState(err.message || "Unable to turn off push notifications."); }
     finally { setPushBusy(false); }
   };
+
+  const closePanel = () => setOpen(false);
+  const selectFilter = (nextFilter) => setFilter(nextFilter);
+  const clearFilter = () => setFilter("all");
+  const saveNotificationSetting = async (patch) => {
+    const next = await api.updateNotificationSettings(patch);
+    setSettings(next);
+    return next;
+  };
+
+  const panelContent = (
+    <>
+      <div className="shrink-0 px-1">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="text-base font-bold text-charcoal md:text-sm">Notifications</h3>
+            <p className="mt-0.5 text-xs font-semibold text-muted">{data.unreadCount} unread</p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              onClick={async () => {
+                await api.markAllNotificationsRead();
+                await load(filter);
+              }}
+              className="rounded-full bg-violetSoft px-3 py-2 text-xs font-bold text-primary"
+            >
+              Mark all read
+            </button>
+            <button
+              type="button"
+              onClick={closePanel}
+              className="grid size-9 place-items-center rounded-full bg-paper text-muted md:hidden"
+              aria-label="Close notifications"
+            >
+              <X size={17} />
+            </button>
+          </div>
+        </div>
+        <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1">
+          {filters.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => selectFilter(item.id)}
+              className={`shrink-0 rounded-full px-3 py-2 text-xs font-bold ${
+                filter === item.id ? "bg-primary text-white shadow-card" : "bg-paper text-charcoal"
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <ActiveFilterChips
+          chips={filter === "all" ? [] : [{ key: "notificationFilter", label: activeFilter?.label || "Notifications" }]}
+          onRemove={clearFilter}
+          onClear={clearFilter}
+        />
+      </div>
+      <div className="mt-3 shrink-0 rounded-2xl bg-violetSoft p-3">
+        <p className="text-xs font-bold text-charcoal">Get payment and receivable reminders even when the app is closed.</p>
+        <p className="mt-1 text-[11px] font-semibold text-muted">Push status: {pushEnabled ? "Enabled" : typeof Notification !== "undefined" && Notification.permission === "denied" ? "Blocked" : "Not configured"}</p>
+        <button onClick={pushEnabled ? disablePush : enablePush} disabled={pushBusy} className="mt-2 rounded-full bg-primary px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
+          {pushBusy ? "Setting up..." : pushEnabled ? "Turn Off Push Notifications" : "Enable Notifications"}
+        </button>
+        {pushState && <p className="mt-2 text-xs font-semibold text-muted">{pushState}</p>}
+        {settings && (
+          <div className="mt-3 space-y-2 border-t border-primary/10 pt-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {[
+                ["paymentReminders", "Payments"],
+                ["receivableReminders", "Receivables"],
+                ["overdueReminders", "Overdue"],
+                ["settlementConfirmations", "Settlements"],
+                ["recurringReminders", "Recurring"]
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => saveNotificationSetting({ [key]: !settings[key] }).catch((err) => setPushState(err.message))}
+                  className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${settings[key] ? "bg-primary text-white" : "bg-paper text-muted"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className="mb-1 block text-[10px] font-bold uppercase text-muted">Preview</span>
+                <select value={settings.preview || "DETAILED"} onChange={(event) => saveNotificationSetting({ preview: event.target.value }).catch((err) => setPushState(err.message))} className="w-full rounded-xl bg-cream px-3 py-2 text-xs font-bold text-charcoal">
+                  <option value="DETAILED">Detailed</option>
+                  <option value="PRIVATE">Private</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[10px] font-bold uppercase text-muted">Starts</span>
+                <select value={settings.reminderStartDaysBefore ?? 3} onChange={(event) => saveNotificationSetting({ reminderStartDaysBefore: Number(event.target.value) }).catch((err) => setPushState(err.message))} className="w-full rounded-xl bg-cream px-3 py-2 text-xs font-bold text-charcoal">
+                  {[0, 1, 2, 3, 5, 7].map((days) => <option key={days} value={days}>{days} days before</option>)}
+                </select>
+              </label>
+            </div>
+            <p className="text-[11px] font-semibold text-muted">Timezone: {settings.timezone || "Asia/Kolkata"} · Reminders: {(settings.reminderTimes || []).join(", ")}</p>
+            {devices.length > 0 && (
+              <div className="space-y-1">
+                {devices.slice(0, 3).map((device) => (
+                  <div key={device._id} className="flex items-center justify-between gap-2 rounded-xl bg-cream px-3 py-2">
+                    <span className="min-w-0 truncate text-[11px] font-bold text-charcoal">{device.platform || device.deviceLabel || "Browser"} {device.isActive ? "Active" : "Off"}</span>
+                    {device.isActive && (
+                      <button type="button" onClick={async () => { await api.disablePushDevice(device._id); setDevices(await api.pushDevices()); }} className="shrink-0 text-[11px] font-bold text-coral">
+                        Disable
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+        <ResourceState loading={loading} error={error} empty={!data.notifications.length} onRetry={() => load(filter)} />
+        {data.notifications.map((item) => (
+          <article key={item._id} className={`rounded-2xl p-3 ${item.status === "UNREAD" ? "bg-paper" : "bg-paper/60"}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h4 className="break-words text-sm font-bold text-charcoal">{item.title}</h4>
+                <p className="mt-1 break-words text-xs font-semibold leading-relaxed text-muted">{item.message}</p>
+              </div>
+              {item.status === "UNREAD" && <span className="mt-1 size-2 shrink-0 rounded-full bg-primary" />}
+            </div>
+            {item.transaction && item.direction !== "NONE" && (
+              <select
+                value={settlementAccounts[item._id] || ""}
+                onChange={(event) => setSettlementAccounts((current) => ({ ...current, [item._id]: event.target.value }))}
+                className="mt-3 w-full rounded-xl bg-cream px-3 py-2 text-xs font-semibold text-charcoal"
+                aria-label="Account for settlement"
+              >
+                <option value="">Select account for settlement</option>
+                {accounts.items.map((account) => <option key={account._id} value={account._id}>{account.name}</option>)}
+              </select>
+            )}
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+              <button
+                onClick={async () => {
+                  await api.markNotificationRead(item._id);
+                  if (item.obligation?._id) {
+                    window.history.pushState({}, "", `/obligations/${item.obligation._id}`);
+                    window.dispatchEvent(new PopStateEvent("popstate"));
+                    setOpen(false);
+                  }
+                  await load(filter);
+                }}
+                className="min-h-10 rounded-full bg-violetSoft px-3 py-2 text-xs font-bold text-primary"
+              >
+                View
+              </button>
+              <button
+                onClick={async () => {
+                  await api.completeNotification(item._id, { account: settlementAccounts[item._id] });
+                  window.dispatchEvent(new CustomEvent("expense-financial-change"));
+                  await load(filter);
+                }}
+                disabled={Boolean(item.transaction && item.direction !== "NONE" && !settlementAccounts[item._id])}
+                className="min-h-10 rounded-full bg-emeraldSoft px-3 py-2 text-xs font-bold text-emerald disabled:opacity-50"
+              >
+                {item.direction === "RECEIVE" ? "Received" : item.direction === "PAY" ? "Mark Paid" : "Done"}
+              </button>
+              <button
+                onClick={async () => {
+                  await api.archiveNotification(item._id);
+                  await load(filter);
+                }}
+                className="col-span-2 min-h-10 rounded-full bg-coralSoft px-3 py-2 text-xs font-bold text-coral sm:col-span-1"
+              >
+                Delete
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </>
+  );
 
   return (
     <div ref={ref} className="relative">
@@ -1127,113 +1334,19 @@ function NotificationBell({ locationKey, refreshKey = 0 }) {
         )}
       </button>
       {open && (
-        <div className="absolute right-0 top-14 z-50 w-[min(22rem,calc(100vw-2rem))] rounded-3xl bg-cream p-3 shadow-soft">
-          <div className="flex items-center justify-between gap-3 px-1">
-            <div>
-              <h3 className="text-sm font-bold">Notifications</h3>
-              <p className="text-xs font-semibold text-muted">{data.unreadCount} unread</p>
-            </div>
-            <button
-              onClick={async () => {
-                await api.markAllNotificationsRead();
-                await load(filter);
-              }}
-              className="rounded-full bg-violetSoft px-3 py-1.5 text-xs font-bold text-primary"
-            >
-              Mark all read
-            </button>
-          </div>
-          <div className="mt-3">
-            <FilterButton refProp={filterButtonRef} active={filterOpen} count={filter === "all" ? 0 : 1} onClick={() => { setDraftFilter(filter); setFilterOpen((current) => !current); }}>
-              <SlidersHorizontal size={16} /> Filter
-            </FilterButton>
-          </div>
-          <ActiveFilterChips
-            chips={filter === "all" ? [] : [{ key: "notificationFilter", label: activeFilter?.label || "Notifications" }]}
-            onRemove={() => { setFilter("all"); setDraftFilter("all"); }}
-            onClear={() => { setFilter("all"); setDraftFilter("all"); }}
+        <>
+          <button
+            type="button"
+            aria-label="Close notifications"
+            className="fixed inset-0 z-[60] bg-black/15 md:hidden"
+            onClick={closePanel}
           />
-          <CompactPopover
-            open={filterOpen}
-            title="Notification Filters"
-            triggerRef={filterButtonRef}
-            onClose={() => setFilterOpen(false)}
-            footer={<FilterActions onReset={() => setDraftFilter("all")} onApply={() => { setFilter(draftFilter); setFilterOpen(false); }} />}
+          <div
+            className="fixed left-3 right-3 top-[calc(env(safe-area-inset-top,0px)+4.75rem)] z-[70] flex max-h-[min(70dvh,600px)] w-[calc(100vw-24px)] max-w-none flex-col rounded-3xl bg-cream p-3 shadow-soft md:absolute md:left-auto md:right-0 md:top-14 md:z-50 md:max-h-[min(78vh,42rem)] md:w-[min(26rem,calc(100vw-2rem))]"
           >
-            <div className="grid grid-cols-2 gap-2">
-              {filters.map((item) => <button key={item.id} type="button" onClick={() => setDraftFilter(item.id)} className={`rounded-2xl px-3 py-3 text-left text-xs font-bold ${draftFilter === item.id ? "bg-primary text-white" : "bg-paper text-charcoal"}`}>{item.label}</button>)}
-            </div>
-          </CompactPopover>
-          <div className="mt-3 rounded-2xl bg-violetSoft p-3">
-            <p className="text-xs font-bold text-charcoal">Get payment and receivable reminders even when the app is closed.</p>
-            <p className="mt-1 text-[11px] font-semibold text-muted">Push status: {pushEnabled ? "Enabled" : typeof Notification !== "undefined" && Notification.permission === "denied" ? "Blocked" : "Not configured"}</p>
-            <button onClick={pushEnabled ? disablePush : enablePush} disabled={pushBusy} className="mt-2 rounded-full bg-primary px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
-              {pushBusy ? "Setting up..." : pushEnabled ? "Turn Off Push Notifications" : "Enable Notifications"}
-            </button>
-            {pushState && <p className="mt-2 text-xs font-semibold text-muted">{pushState}</p>}
+            {panelContent}
           </div>
-          <div className="mt-3 max-h-96 space-y-2 overflow-y-auto pr-1">
-            <ResourceState loading={loading} error={error} empty={!data.notifications.length} onRetry={() => load(filter)} />
-            {data.notifications.map((item) => (
-              <article key={item._id} className={`rounded-2xl p-3 ${item.status === "UNREAD" ? "bg-paper" : "bg-paper/60"}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h4 className="truncate text-sm font-bold">{item.title}</h4>
-                    <p className="mt-1 text-xs font-semibold text-muted">{item.message}</p>
-                  </div>
-                  {item.status === "UNREAD" && <span className="mt-1 size-2 shrink-0 rounded-full bg-primary" />}
-                </div>
-                {item.transaction && item.direction !== "NONE" && (
-                  <select
-                    value={settlementAccounts[item._id] || ""}
-                    onChange={(event) => setSettlementAccounts((current) => ({ ...current, [item._id]: event.target.value }))}
-                    className="mt-3 w-full rounded-xl bg-cream px-3 py-2 text-xs font-semibold text-charcoal"
-                    aria-label="Account for settlement"
-                  >
-                    <option value="">Select account for settlement</option>
-                    {accounts.items.map((account) => <option key={account._id} value={account._id}>{account.name}</option>)}
-                  </select>
-                )}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    onClick={async () => {
-                      await api.markNotificationRead(item._id);
-                      if (item.obligation?._id) {
-                        window.history.pushState({}, "", `/obligations/${item.obligation._id}`);
-                        window.dispatchEvent(new PopStateEvent("popstate"));
-                        setOpen(false);
-                      }
-                      await load(filter);
-                    }}
-                    className="rounded-full bg-violetSoft px-3 py-1.5 text-xs font-bold text-primary"
-                  >
-                    View
-                  </button>
-                  <button
-                    onClick={async () => {
-                      await api.completeNotification(item._id, { account: settlementAccounts[item._id] });
-                      window.dispatchEvent(new CustomEvent("expense-financial-change"));
-                      await load(filter);
-                    }}
-                    disabled={Boolean(item.transaction && item.direction !== "NONE" && !settlementAccounts[item._id])}
-                    className="rounded-full bg-emeraldSoft px-3 py-1.5 text-xs font-bold text-emerald disabled:opacity-50"
-                  >
-                    {item.direction === "RECEIVE" ? "Received" : item.direction === "PAY" ? "Mark Paid" : "Done"}
-                  </button>
-                  <button
-                    onClick={async () => {
-                      await api.archiveNotification(item._id);
-                      await load(filter);
-                    }}
-                    className="rounded-full bg-coralSoft px-3 py-1.5 text-xs font-bold text-coral"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
+        </>
       )}
     </div>
   );
@@ -1448,7 +1561,8 @@ function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, 
   ];
   const partialCount = dashboard.partialSettlementCount || 0;
   const usableAccounts = accounts.items.filter((account) => account.isActive !== false && ["CASH", "BANK", "WALLET"].includes(String(account.type || "").toUpperCase()));
-  const currentBalance = usableAccounts.reduce((total, account) => total + Number(account.currentBalance || 0), 0);
+  const accountBalanceFallback = usableAccounts.reduce((total, account) => total + Number(account.currentBalance || 0), 0);
+  const currentBalance = Number.isFinite(Number(dashboard.availableMoney)) ? Number(dashboard.availableMoney) : accountBalanceFallback;
   const recentEvents = activity.items.slice(0, 6);
   const openRecentEvent = async (event) => {
     const transaction = event.rootTransaction || event.transaction;
@@ -3938,7 +4052,9 @@ function AccountsScreen({ refreshKey = 0, onBack }) {
   const resource = useResource("accounts", {}, refreshKey);
   const [editing, setEditing] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
-  const totalBalance = resource.items.reduce((sum, item) => sum + Number(item.currentBalance || 0), 0);
+  const totalBalance = resource.items
+    .filter((item) => item.isActive !== false && ["CASH", "BANK", "WALLET"].includes(String(item.type || "").toUpperCase()))
+    .reduce((sum, item) => sum + Number(item.currentBalance || 0), 0);
 
   return (
     <MasterScreenShell
@@ -3953,7 +4069,7 @@ function AccountsScreen({ refreshKey = 0, onBack }) {
       }}
     >
       <section className="rounded-3xl bg-cream p-5 shadow-card">
-        <p className="text-sm font-semibold text-muted">Total account balance</p>
+        <p className="text-sm font-semibold text-muted">Cash, bank and wallet balance</p>
         <h2 className="mt-2 text-4xl font-bold tracking-tight text-primary">{formatCurrency(totalBalance)}</h2>
       </section>
       <ResourceState loading={resource.loading} error={resource.error} empty={!resource.items.length} onRetry={resource.refresh} />
@@ -5340,7 +5456,7 @@ function transactionFormDefaults(type = "EXPENSE") {
     reminderStartDaysBefore: 3,
     reminderTime1: "09:00",
     reminderTime2: "14:00",
-    reminderTime3: "20:00",
+    reminderTime3: "19:00",
     myShare: "",
     splitPerson: "",
     splitAmount: ""
@@ -5358,11 +5474,11 @@ function buildTransactionPayload(type, form) {
       note: form.note,
       transactionDate: form.transactionDate,
       transactionTime: form.transactionTime,
-    dueDate: form.dueDate || undefined,
-    reminderEnabled: form.reminderEnabled,
-    reminderStartDaysBefore: Number(form.reminderStartDaysBefore || 3),
-    reminderTimes: [form.reminderTime1, form.reminderTime2, form.reminderTime3].filter(Boolean),
-    participants: form.splitPerson && form.splitAmount ? [{ person: form.splitPerson, amount: Number(form.splitAmount) }] : []
+      dueDate: form.dueDate || undefined,
+      reminderEnabled: form.reminderEnabled,
+      reminderStartDaysBefore: Number(form.reminderStartDaysBefore || 3),
+      reminderTimes: [form.reminderTime1, form.reminderTime2, form.reminderTime3].filter(Boolean),
+      participants: form.splitPerson && form.splitAmount ? [{ person: form.splitPerson, amount: Number(form.splitAmount) }] : []
     };
   }
 
@@ -5378,7 +5494,7 @@ function buildTransactionPayload(type, form) {
     transactionDate: form.transactionDate,
     transactionTime: form.transactionTime,
     dueDate: form.dueDate || undefined,
-    reminderEnabled: form.reminderEnabled,
+    reminderEnabled: Boolean(form.reminderEnabled || (["BORROW", "LEND", "PAID_FOR_SOMEONE", "PAID_BY_SOMEONE"].includes(type) && form.dueDate)),
     reminderStartDaysBefore: Number(form.reminderStartDaysBefore || 3),
     reminderTimes: [form.reminderTime1, form.reminderTime2, form.reminderTime3].filter(Boolean)
   };
@@ -5443,7 +5559,7 @@ function recurringFormDefaults() {
     reminderStartDaysBefore: 3,
     reminderTime1: "09:00",
     reminderTime2: "14:00",
-    reminderTime3: "20:00"
+    reminderTime3: "19:00"
   };
 }
 
@@ -5456,8 +5572,8 @@ function BottomNav({ activeTab, onChange, onAdd }) {
   const items = navigationItems.filter((item) => ["home", "activity", "people", "settlements"].includes(item.id));
 
   return (
-    <nav className="safe-area-bottom-nav fixed inset-x-0 z-40 mx-auto max-w-md px-5 pb-4 md:hidden">
-      <div className="relative grid grid-cols-5 items-center rounded-[1.6rem] bg-cream px-2 py-3 shadow-soft">
+    <nav className="safe-area-bottom-nav fixed inset-x-0 z-40 md:hidden">
+      <div className="relative mx-auto grid max-w-md grid-cols-5 items-center rounded-[1.6rem] bg-cream px-2 py-3 shadow-soft">
         {items.slice(0, 2).map((item) => (
           <NavItem key={item.id} item={item} active={activeTab === item.id} onClick={() => onChange(item.id)} />
         ))}
