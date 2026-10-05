@@ -102,6 +102,12 @@ async function refreshAccessToken({ silent = false } = {}) {
   }
 }
 
+export function eventsUrl(token = getAuthToken()) {
+  const url = new URL(`${API_BASE_URL}/events`);
+  if (token) url.searchParams.set("token", token);
+  return url.toString();
+}
+
 async function fetchWithAuth(path, options = {}, { retry = true } = {}) {
   const token = getAuthToken();
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -143,9 +149,11 @@ async function request(path, options = {}) {
   }
 
   try {
+    const { signal, ...fetchOptions } = options;
     response = await fetchWithAuth(path, {
-      ...options,
-      headers: { "Content-Type": "application/json", ...options.headers }
+      ...fetchOptions,
+      signal,
+      headers: { "Content-Type": "application/json", ...fetchOptions.headers }
     });
   } catch (err) {
     if (err.status || err.kind) throw err;
@@ -203,8 +211,8 @@ function friendlyStatusMessage(status) {
 }
 
 export const api = {
-  list: (resource, params) => request(withQuery(`/${resource}`, params)),
-  get: (resource, id) => request(`/${resource}/${id}`),
+  list: (resource, params, options) => request(withQuery(`/${resource}`, params), options),
+  get: (resource, id, options) => request(`/${resource}/${id}`, options),
   create: (resource, data, { idempotencyKey } = {}) =>
     idempotentRequest(`/${resource}`, {
       method: "POST",
@@ -217,8 +225,8 @@ export const api = {
     }, idempotencyKey),
   remove: (resource, id, { idempotencyKey } = {}) =>
     idempotentRequest(`/${resource}/${id}`, { method: "DELETE" }, idempotencyKey),
-  summary: (params) => request(withQuery("/transactions/summary", params)),
-  reports: (params) => request(withQuery("/transactions/reports", params)),
+  summary: (params, options) => request(withQuery("/transactions/summary", params), options),
+  reports: (params, options) => request(withQuery("/transactions/reports", params), options),
   personLedger: (id, params) => request(withQuery(`/people/${id}/ledger`, params)),
   accountLedger: (id) => request(`/accounts/${id}/ledger`),
   obligations: (params) => request(withQuery("/obligations", params)),
@@ -244,6 +252,7 @@ export const api = {
   updateNotificationSettings: (settings) => request("/notifications/settings", { method: "PATCH", body: JSON.stringify(settings) }),
   savePushSubscription: (subscription) => request("/notifications/push/subscriptions", { method: "POST", body: JSON.stringify({ subscription, deviceId: pushDeviceId(), deviceLabel: navigator.userAgent.slice(0, 110), platform: pushPlatform() }) }),
   removePushSubscription: (subscription) => request("/notifications/push/subscriptions", { method: "DELETE", body: JSON.stringify({ endpoint: subscription.endpoint }) }),
+  sendTestPush: () => idempotentRequest("/notifications/test-push", { method: "POST" }),
   markNotificationRead: (id) =>
     request(`/notifications/${id}/read`, {
       method: "PATCH"

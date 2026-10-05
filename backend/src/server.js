@@ -1,8 +1,16 @@
 import app from "./app.js";
 import connectDatabase from "./config/database.js";
 import { processScheduledNotifications } from "./controllers/notificationController.js";
+import { validateVapidConfiguration } from "./services/pushService.js";
 
 const PORT = process.env.PORT || 5000;
+
+try {
+  validateVapidConfiguration();
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
 
 connectDatabase()
   .then(() => {

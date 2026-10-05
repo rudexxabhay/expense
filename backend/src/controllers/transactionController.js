@@ -920,7 +920,7 @@ export const getTransactionSummary = asyncHandler(async (req, res) => {
     });
   const periodMatch = { userId: req.userId, status: "ACTIVE", ...(dateRange ? { transactionDate: dateRange } : {}) };
   const [accounts, periodTotals, personOutstanding, peopleOutstanding, currentObligations, periodSettlements, allTimeSettlements, settlementPersonalExpense] = await Promise.all([
-    Account.find({ userId: req.userId, isActive: true, type: { $in: ["CASH", "BANK", "WALLET"] } }),
+    Account.find({ userId: req.userId, isActive: true, type: { $in: ["CASH", "BANK", "WALLET"] } }).select("currentBalance").lean(),
     Transaction.aggregate([
       {
         $match: {

@@ -18,5 +18,6 @@ const accountSchema = new mongoose.Schema(
 );
 
 accountSchema.index({ userId: 1, name: 1, type: 1 }, { unique: true });
+accountSchema.index({ userId: 1, isActive: 1, type: 1 });
 
 export default mongoose.model("Account", accountSchema);

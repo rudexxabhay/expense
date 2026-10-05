@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   ArrowDownLeft,
@@ -37,7 +38,8 @@ import {
   X
 } from "lucide-react";
 import { addOptions } from "./data/mockData";
-import { api, getAuthToken, setAuthToken } from "./api/client";
+import { api, eventsUrl, getAuthToken, setAuthToken } from "./api/client";
+import { invalidateFinancialQueries, queryClient, queryKeys } from "./queryClient.js";
 
 const toneStyles = {
   primary: "bg-violetSoft text-primary",
@@ -105,7 +107,12 @@ const DEFAULT_THEME = "indigo";
 const THEME_CACHE_KEY = "expense_tracker_theme";
 const AUTH_USER_CACHE_KEY = "expense_tracker_user";
 const AUTH_LOGOUT_KEY = "expense_tracker_logged_out";
-
+console.log(
+  "VITE_ENABLE_TEST_PUSH:",
+  import.meta.env.VITE_ENABLE_TEST_PUSH
+);
+const enableTestPush =
+  import.meta.env.VITE_ENABLE_TEST_PUSH === "true";
 function cacheAuthUser(user) {
   const safeUser = user ? {
     name: user.name,
@@ -208,10 +215,54 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const refreshFinancialData = () => setTransactionVersion((version) => version + 1);
+    const refreshFinancialData = () => {
+      invalidateFinancialQueries(queryClient, { type: "local.financial-change" });
+      setTransactionVersion((version) => version + 1);
+    };
     window.addEventListener("expense-financial-change", refreshFinancialData);
     return () => window.removeEventListener("expense-financial-change", refreshFinancialData);
   }, []);
+
+  useEffect(() => {
+    if (!authUser || !getAuthToken()) return undefined;
+    const idle = window.requestIdleCallback || ((callback) => window.setTimeout(callback, 250));
+    const cancelIdle = window.cancelIdleCallback || window.clearTimeout;
+    const handle = idle(() => {
+      queryClient.prefetchQuery({ queryKey: queryKeys.resource("obligations", { history: "true" }), queryFn: ({ signal }) => api.list("obligations", { history: "true" }, { signal }), staleTime: 30_000 });
+      queryClient.prefetchQuery({ queryKey: queryKeys.resource("activity", { sort: "newest", limit: 100 }), queryFn: ({ signal }) => api.list("activity", { sort: "newest", limit: 100 }, { signal }), staleTime: 20_000 });
+      queryClient.prefetchQuery({ queryKey: queryKeys.resource("people", {}), queryFn: ({ signal }) => api.list("people", {}, { signal }), staleTime: 60_000 });
+      queryClient.prefetchQuery({ queryKey: queryKeys.resource("accounts", {}), queryFn: ({ signal }) => api.list("accounts", {}, { signal }), staleTime: 30_000 });
+    });
+    return () => cancelIdle(handle);
+  }, [authUser?._id]);
+
+  useEffect(() => {
+    if (!authUser || !getAuthToken() || typeof EventSource === "undefined") return undefined;
+    let closed = false;
+    let source;
+    const connect = () => {
+      source = new EventSource(eventsUrl(), { withCredentials: true });
+      source.addEventListener("financial-event", (event) => {
+        try {
+          invalidateFinancialQueries(queryClient, JSON.parse(event.data || "{}"));
+        } catch {
+          invalidateFinancialQueries(queryClient);
+        }
+      });
+      source.addEventListener("open", () => {
+        invalidateFinancialQueries(queryClient, { type: "realtime.reconnected" });
+      });
+      source.addEventListener("error", () => {
+        source?.close();
+        if (!closed) window.setTimeout(connect, 3000);
+      });
+    };
+    connect();
+    return () => {
+      closed = true;
+      source?.close();
+    };
+  }, [authUser?._id]);
 
   useEffect(() => {
     const goOnline = () => setOnline(true);
@@ -237,6 +288,7 @@ function App() {
       if (authExpiredHandled.current) return;
       authExpiredHandled.current = true;
       setAuthToken(null);
+      queryClient.clear();
       cacheAuthUser(null);
       setAuthUser(null);
       setAuthMode("login");
@@ -352,6 +404,7 @@ function App() {
     localStorage.setItem(AUTH_LOGOUT_KEY, "true");
     authExpiredHandled.current = true;
     setAuthToken(null);
+    queryClient.clear();
     cacheAuthUser(null);
     setAuthUser(null);
     setAuthMode("login");
@@ -518,10 +571,10 @@ function App() {
     <div className="app-shell text-charcoal md:grid md:grid-cols-[5.5rem_minmax(0,1fr)] xl:grid-cols-[13.5rem_minmax(0,1fr)]">
       <ResponsiveSidebar activeTab={activeTab} activeManager={activeManager} onNavigate={handleNavigate} onAdd={() => setSheetOpen(true)} />
       <div className="min-w-0 md:min-h-screen">
-        <DesktopTopHeader title={pageTitle} user={authUser} onAdd={() => setSheetOpen(true)} onLogout={handleLogout} onThemeChange={handleThemeChange} onNavigate={handleNavigate} locationKey={`${path}:${screen}`} refreshKey={transactionVersion} />
+        <DesktopTopHeader title={pageTitle} user={authUser} onAdd={() => setSheetOpen(true)} onLogout={handleLogout} onThemeChange={handleThemeChange} onNavigate={handleNavigate} locationKey={`${path}:${screen}`} refreshKey={transactionVersion} showToast={showToast} />
         {!online && <OfflineBanner />}
         <main className={`app-main mx-auto w-full bg-paper shadow-[0_0_60px_rgba(55,42,82,0.08)] md:max-w-none md:bg-transparent md:px-5 md:pt-3 md:shadow-none lg:px-6 xl:max-w-[1560px] xl:px-8 ${screen === "obligation-detail" ? "pb-0 md:pb-10" : "app-main-mobile-spacing md:pb-10"}`}>
-        {screen === "home" && <HomeDashboard refreshKey={transactionVersion} user={authUser} onLogout={handleLogout} onThemeChange={handleThemeChange} onNavigate={handleNavigate} locationKey={`${path}:${screen}`} onNavigateToSettlements={(view = "all", source = "", period = {}) => {
+        {screen === "home" && <HomeDashboard refreshKey={transactionVersion} user={authUser} onLogout={handleLogout} onThemeChange={handleThemeChange} onNavigate={handleNavigate} locationKey={`${path}:${screen}`} showToast={showToast} onNavigateToSettlements={(view = "all", source = "", period = {}) => {
           const params = new URLSearchParams({ ...(view && view !== "all" ? { view } : {}), ...(source ? { source } : {}), ...period });
           const queryString = params.toString();
           const nextPath = `/settlements${queryString ? `?${queryString}` : ""}`;
@@ -840,7 +893,7 @@ function useDismissablePopup({ open, onClose, refs, closeKey }) {
   }, [open]);
 }
 
-function PremiumHeader({ user, onLogout, onThemeChange, onNavigate, locationKey, refreshKey = 0 }) {
+function PremiumHeader({ user, onLogout, onThemeChange, onNavigate, locationKey, refreshKey = 0, showToast }) {
   const [open, setOpen] = useState(false);
   const profileRef = useRef(null);
 
@@ -853,7 +906,7 @@ function PremiumHeader({ user, onLogout, onThemeChange, onNavigate, locationKey,
         <p className="mt-0.5 text-xs font-medium text-muted">Your money overview at a glance</p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <NotificationBell locationKey={locationKey} refreshKey={refreshKey} />
+        <NotificationBell locationKey={locationKey} refreshKey={refreshKey} showToast={showToast} />
         <ThemeAction onThemeChange={onThemeChange} locationKey={locationKey} />
         <div ref={profileRef} className="relative">
           <button
@@ -919,7 +972,7 @@ function SidebarItem({ item, active, onClick }) {
   );
 }
 
-function DesktopTopHeader({ title, user, onAdd, onLogout, onThemeChange, onNavigate, locationKey, refreshKey = 0 }) {
+function DesktopTopHeader({ title, user, onAdd, onLogout, onThemeChange, onNavigate, locationKey, refreshKey = 0, showToast }) {
   const month = new Date().toLocaleDateString("en-IN", { month: "long", year: "numeric" });
   const [open, setOpen] = useState(false);
   const profileRef = useRef(null);
@@ -946,7 +999,7 @@ function DesktopTopHeader({ title, user, onAdd, onLogout, onThemeChange, onNavig
           <Plus size={18} />
           Add Transaction
         </button>
-        <NotificationBell locationKey={locationKey} refreshKey={refreshKey} />
+        <NotificationBell locationKey={locationKey} refreshKey={refreshKey} showToast={showToast} />
         <ThemeAction onThemeChange={onThemeChange} locationKey={locationKey} />
         <div ref={profileRef} className="relative">
           <button
@@ -1027,20 +1080,18 @@ function ThemePicker({ onSelect, inline = false }) {
   );
 }
 
-function NotificationBell({ locationKey, refreshKey = 0 }) {
+function NotificationBell({ locationKey, refreshKey = 0, showToast }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("all");
-  const [settlementAccounts, setSettlementAccounts] = useState({});
   const [data, setData] = useState({ notifications: [], unreadCount: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [pushState, setPushState] = useState("");
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
-  const [settings, setSettings] = useState(null);
-  const [devices, setDevices] = useState([]);
+  const [testBusy, setTestBusy] = useState(false);
+  const testInFlight = useRef(false);
   const ref = useRef(null);
-  const accounts = useResource("accounts", {}, open ? 1 : 0);
 
   useDismissablePopup({ open, onClose: () => setOpen(false), refs: [ref], closeKey: locationKey });
 
@@ -1065,6 +1116,19 @@ function NotificationBell({ locationKey, refreshKey = 0 }) {
   }, []);
 
   useEffect(() => {
+    if (!("serviceWorker" in navigator)) return undefined;
+    const onMessage = (event) => {
+      if (event.data?.type !== "push-diagnostic") return;
+      console.info("[push] service worker diagnostic", event.data);
+      if (event.data.stage === "showNotification" && event.data.ok) setPushState("Service worker displayed the notification.");
+      if (event.data.stage === "showNotification" && event.data.ok === false) setPushState(event.data.message || "Service worker could not display the notification.");
+      if (event.data.stage === "push") load(open ? filter : "all");
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
+  }, [open, filter]);
+
+  useEffect(() => {
     if (open) load(filter);
   }, [open, filter]);
 
@@ -1072,49 +1136,78 @@ function NotificationBell({ locationKey, refreshKey = 0 }) {
     load(open ? filter : "all");
   }, [refreshKey]);
 
+  const refreshPushState = async () => {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || typeof Notification === "undefined") {
+      setPushEnabled(false);
+      return;
+    }
+    if (Notification.permission !== "granted") {
+      setPushEnabled(false);
+      if (Notification.permission === "denied") setPushState("Notification permission is blocked.");
+      return;
+    }
+    const registration = await navigator.serviceWorker.getRegistration("/");
+    const subscription = await registration?.pushManager.getSubscription();
+    setPushEnabled(Boolean(subscription));
+  };
+
   useEffect(() => {
     if (!open) return;
-    api.pushStatus().then((status) => setPushEnabled(status.activeDevices > 0)).catch(() => {});
-    api.notificationSettings().then(setSettings).catch(() => {});
-    api.pushDevices().then(setDevices).catch(() => {});
+    refreshPushState().catch(() => setPushEnabled(false));
   }, [open]);
 
   const filters = [
     { id: "all", label: "All" },
-    { id: "due_today_pay", label: "Payments Due Today" },
-    { id: "due_today_receive", label: "Expected Today" },
-    { id: "upcoming_pay", label: "Upcoming Payments" },
-    { id: "upcoming_receive", label: "Upcoming Receivables" },
-    { id: "overdue_pay", label: "Overdue Payments" },
-    { id: "overdue_receive", label: "Overdue Receivables" },
-    { id: "to_receive", label: "To Receive" },
-    { id: "to_pay", label: "To Pay" }
+    { id: "payments", label: "Payments" },
+    { id: "receivables", label: "Receivables" },
+    { id: "overdue", label: "Overdue" },
+    { id: "system", label: "System" }
   ];
   const activeFilter = filters.find((item) => item.id === filter);
+
+  const ensurePushSubscription = async () => {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) throw new Error("Push notifications are not supported by this browser.");
+    if (typeof Notification === "undefined") throw new Error("Push notifications are not supported by this browser.");
+    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent || "");
+    const isStandalone = window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+    if (isIos && !isStandalone) throw new Error("Install this app on your Home Screen to enable push notifications.");
+    if (Notification.permission === "denied") throw new Error("Notification permission is blocked.");
+    const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+    if (permission !== "granted") throw new Error("Notification permission is blocked.");
+    const config = await api.pushConfig();
+    if (!config.publicKey) throw new Error("Push notifications are not configured yet.");
+    const registration = await navigator.serviceWorker.register("/sw.js");
+    await registration.update().catch(() => undefined);
+    const readyRegistration = await navigator.serviceWorker.ready;
+    const activeWorker = readyRegistration.active || registration.active;
+    if (!activeWorker) throw new Error("Service worker is not active yet. Please retry in a moment.");
+    console.info("[push] active service worker", {
+      scriptURL: activeWorker.scriptURL,
+      scope: readyRegistration.scope,
+      state: activeWorker.state,
+      permission
+    });
+    const existing = await readyRegistration.pushManager.getSubscription();
+    const applicationServerKey = decodeVapidKey(config.publicKey);
+    const existingKey = existing?.options?.applicationServerKey ? bufferToBase64Url(existing.options.applicationServerKey) : "";
+    if (existing && existingKey && existingKey !== config.publicKey) {
+      await api.removePushSubscription(existing.toJSON()).catch(() => undefined);
+      await existing.unsubscribe().catch(() => undefined);
+    }
+    const current = await readyRegistration.pushManager.getSubscription();
+    const subscription = current || await readyRegistration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
+    await api.savePushSubscription(subscription.toJSON());
+    setPushEnabled(true);
+    return subscription;
+  };
 
   const enablePush = async () => {
     setPushBusy(true);
     setPushState("");
     try {
-      if (!("serviceWorker" in navigator) || !("PushManager" in window)) throw new Error("Push notifications are not supported by this browser.");
-      if (typeof Notification === "undefined") throw new Error("Push notifications are not supported by this browser.");
-      const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent || "");
-      const isStandalone = window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
-      if (isIos && !isStandalone) throw new Error("Install this app on your Home Screen to enable push notifications.");
-      if (Notification.permission === "denied") throw new Error("Notifications are blocked. Re-enable them from your browser or system settings.");
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") throw new Error("Notifications are blocked in your browser settings. In-app reminders will still be available.");
-      const config = await api.pushConfig();
-      if (!config.publicKey) throw new Error("Push notifications are not configured yet. In-app reminders will still be available.");
-      const registration = await navigator.serviceWorker.register("/sw.js");
-      const existing = await registration.pushManager.getSubscription();
-      const subscription = existing || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodeVapidKey(config.publicKey) });
-      await api.savePushSubscription(subscription.toJSON());
-      setPushEnabled(true);
+      await ensurePushSubscription();
       await api.updateNotificationSettings({ pushEnabled: true });
-      setSettings((current) => current ? { ...current, pushEnabled: true } : current);
-      api.pushDevices().then(setDevices).catch(() => {});
-      setPushState("Push notifications are enabled on this device.");
+      setPushState("");
     } catch (err) {
       setPushState(err.message || "Unable to enable push notifications.");
     } finally { setPushBusy(false); }
@@ -1131,9 +1224,7 @@ function NotificationBell({ locationKey, refreshKey = 0 }) {
       }
       setPushEnabled(false);
       await api.updateNotificationSettings({ pushEnabled: false }).catch(() => {});
-      setSettings((current) => current ? { ...current, pushEnabled: false } : current);
-      api.pushDevices().then(setDevices).catch(() => {});
-      setPushState("Push notifications are off on this device. In-app reminders remain available.");
+      setPushState("");
     } catch (err) { setPushState(err.message || "Unable to turn off push notifications."); }
     finally { setPushBusy(false); }
   };
@@ -1141,10 +1232,39 @@ function NotificationBell({ locationKey, refreshKey = 0 }) {
   const closePanel = () => setOpen(false);
   const selectFilter = (nextFilter) => setFilter(nextFilter);
   const clearFilter = () => setFilter("all");
-  const saveNotificationSetting = async (patch) => {
-    const next = await api.updateNotificationSettings(patch);
-    setSettings(next);
-    return next;
+  const openNotification = async (item) => {
+    const target = item.obligation?._id ? `/obligations/${item.obligation._id}` : item.deepLink || "";
+    if (!target) return;
+    await api.markNotificationRead(item._id);
+    window.history.pushState({}, "", target);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    setOpen(false);
+    await load(filter);
+  };
+  const sendTestNotification = async () => {
+    if (testInFlight.current) return;
+    testInFlight.current = true;
+    setTestBusy(true);
+    setPushState("");
+    try {
+      if (typeof Notification === "undefined" || Notification.permission === "denied") throw new Error("Notification permission is blocked.");
+      await ensurePushSubscription();
+      await api.updateNotificationSettings({ pushEnabled: true }).catch(() => {});
+      const result = await api.sendTestPush();
+      const count = Number(result?.sent || 0);
+      if (!count) throw new Error(result?.disabled ? "Push subscription expired." : "Push provider rejected the request.");
+      const message = count === 1 ? "Push accepted by 1 device." : `Push accepted by ${count} devices.`;
+      showToast?.({ key: "test-push-accepted", title: message, message: "If no OS notification appears, Chrome or Windows notifications may be blocking it." });
+      setPushState(message);
+      await load(filter);
+    } catch (err) {
+      const message = err.message || "Push delivery failed.";
+      showToast?.({ key: `test-push-error-${message}`, tone: "error", title: message });
+      setPushState(message);
+    } finally {
+      setTestBusy(false);
+      testInFlight.current = false;
+    }
   };
 
   const panelContent = (
@@ -1195,126 +1315,29 @@ function NotificationBell({ locationKey, refreshKey = 0 }) {
           onClear={clearFilter}
         />
       </div>
-      <div className="mt-3 shrink-0 rounded-2xl bg-violetSoft p-3">
-        <p className="text-xs font-bold text-charcoal">Get payment and receivable reminders even when the app is closed.</p>
-        <p className="mt-1 text-[11px] font-semibold text-muted">Push status: {pushEnabled ? "Enabled" : typeof Notification !== "undefined" && Notification.permission === "denied" ? "Blocked" : "Not configured"}</p>
-        <button onClick={pushEnabled ? disablePush : enablePush} disabled={pushBusy} className="mt-2 rounded-full bg-primary px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
-          {pushBusy ? "Setting up..." : pushEnabled ? "Turn Off Push Notifications" : "Enable Notifications"}
-        </button>
-        {pushState && <p className="mt-2 text-xs font-semibold text-muted">{pushState}</p>}
-        {settings && (
-          <div className="mt-3 space-y-2 border-t border-primary/10 pt-3">
-            <div className="flex flex-wrap items-center gap-2">
-              {[
-                ["paymentReminders", "Payments"],
-                ["receivableReminders", "Receivables"],
-                ["overdueReminders", "Overdue"],
-                ["settlementConfirmations", "Settlements"],
-                ["recurringReminders", "Recurring"]
-              ].map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => saveNotificationSetting({ [key]: !settings[key] }).catch((err) => setPushState(err.message))}
-                  className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${settings[key] ? "bg-primary text-white" : "bg-paper text-muted"}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <label className="block">
-                <span className="mb-1 block text-[10px] font-bold uppercase text-muted">Preview</span>
-                <select value={settings.preview || "DETAILED"} onChange={(event) => saveNotificationSetting({ preview: event.target.value }).catch((err) => setPushState(err.message))} className="w-full rounded-xl bg-cream px-3 py-2 text-xs font-bold text-charcoal">
-                  <option value="DETAILED">Detailed</option>
-                  <option value="PRIVATE">Private</option>
-                </select>
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-[10px] font-bold uppercase text-muted">Starts</span>
-                <select value={settings.reminderStartDaysBefore ?? 3} onChange={(event) => saveNotificationSetting({ reminderStartDaysBefore: Number(event.target.value) }).catch((err) => setPushState(err.message))} className="w-full rounded-xl bg-cream px-3 py-2 text-xs font-bold text-charcoal">
-                  {[0, 1, 2, 3, 5, 7].map((days) => <option key={days} value={days}>{days} days before</option>)}
-                </select>
-              </label>
-            </div>
-            <p className="text-[11px] font-semibold text-muted">Timezone: {settings.timezone || "Asia/Kolkata"} · Reminders: {(settings.reminderTimes || []).join(", ")}</p>
-            {devices.length > 0 && (
-              <div className="space-y-1">
-                {devices.slice(0, 3).map((device) => (
-                  <div key={device._id} className="flex items-center justify-between gap-2 rounded-xl bg-cream px-3 py-2">
-                    <span className="min-w-0 truncate text-[11px] font-bold text-charcoal">{device.platform || device.deviceLabel || "Browser"} {device.isActive ? "Active" : "Off"}</span>
-                    {device.isActive && (
-                      <button type="button" onClick={async () => { await api.disablePushDevice(device._id); setDevices(await api.pushDevices()); }} className="shrink-0 text-[11px] font-bold text-coral">
-                        Disable
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+      <div className="mt-3 shrink-0 rounded-2xl border border-charcoal/5 bg-paper/70 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs font-bold text-charcoal">{pushEnabled ? "Notifications enabled" : "Push notifications are off"}</p>
+          {pushEnabled ? (
+            <button onClick={disablePush} disabled={pushBusy || testBusy} className="shrink-0 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-muted disabled:opacity-50">
+              Disable
+            </button>
+          ) : (
+            <button onClick={enablePush} disabled={pushBusy || testBusy} className="shrink-0 rounded-full bg-primary px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
+              {pushBusy ? "Setting up..." : "Enable Notifications"}
+            </button>
+          )}
+        </div>
+        {enableTestPush && (
+          <button onClick={sendTestNotification} disabled={pushBusy || testBusy} className="mt-2 min-h-10 w-full rounded-full bg-charcoal px-3 py-2 text-xs font-bold text-white disabled:opacity-50">
+            {testBusy ? "Sending..." : "Send Test Notification"}
+          </button>
         )}
+        {pushState && <p className="mt-2 text-xs font-semibold text-muted">{pushState}</p>}
       </div>
       <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
         <ResourceState loading={loading} error={error} empty={!data.notifications.length} onRetry={() => load(filter)} />
-        {data.notifications.map((item) => (
-          <article key={item._id} className={`rounded-2xl p-3 ${item.status === "UNREAD" ? "bg-paper" : "bg-paper/60"}`}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h4 className="break-words text-sm font-bold text-charcoal">{item.title}</h4>
-                <p className="mt-1 break-words text-xs font-semibold leading-relaxed text-muted">{item.message}</p>
-              </div>
-              {item.status === "UNREAD" && <span className="mt-1 size-2 shrink-0 rounded-full bg-primary" />}
-            </div>
-            {item.transaction && item.direction !== "NONE" && (
-              <select
-                value={settlementAccounts[item._id] || ""}
-                onChange={(event) => setSettlementAccounts((current) => ({ ...current, [item._id]: event.target.value }))}
-                className="mt-3 w-full rounded-xl bg-cream px-3 py-2 text-xs font-semibold text-charcoal"
-                aria-label="Account for settlement"
-              >
-                <option value="">Select account for settlement</option>
-                {accounts.items.map((account) => <option key={account._id} value={account._id}>{account.name}</option>)}
-              </select>
-            )}
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-              <button
-                onClick={async () => {
-                  await api.markNotificationRead(item._id);
-                  if (item.obligation?._id) {
-                    window.history.pushState({}, "", `/obligations/${item.obligation._id}`);
-                    window.dispatchEvent(new PopStateEvent("popstate"));
-                    setOpen(false);
-                  }
-                  await load(filter);
-                }}
-                className="min-h-10 rounded-full bg-violetSoft px-3 py-2 text-xs font-bold text-primary"
-              >
-                View
-              </button>
-              <button
-                onClick={async () => {
-                  await api.completeNotification(item._id, { account: settlementAccounts[item._id] });
-                  window.dispatchEvent(new CustomEvent("expense-financial-change"));
-                  await load(filter);
-                }}
-                disabled={Boolean(item.transaction && item.direction !== "NONE" && !settlementAccounts[item._id])}
-                className="min-h-10 rounded-full bg-emeraldSoft px-3 py-2 text-xs font-bold text-emerald disabled:opacity-50"
-              >
-                {item.direction === "RECEIVE" ? "Received" : item.direction === "PAY" ? "Mark Paid" : "Done"}
-              </button>
-              <button
-                onClick={async () => {
-                  await api.archiveNotification(item._id);
-                  await load(filter);
-                }}
-                className="col-span-2 min-h-10 rounded-full bg-coralSoft px-3 py-2 text-xs font-bold text-coral sm:col-span-1"
-              >
-                Delete
-              </button>
-            </div>
-          </article>
-        ))}
+        {data.notifications.map((item) => <CompactNotificationItem key={item._id} item={item} onOpen={openNotification} />)}
       </div>
     </>
   );
@@ -1479,7 +1502,70 @@ function decodeVapidKey(value) {
   return Uint8Array.from(raw, (character) => character.charCodeAt(0));
 }
 
-function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, locationKey, onNavigateToActivity, onNavigateToSettlements }) {
+function notificationCategoryLabel(item) {
+  if (item.type === "SYSTEM") return "System";
+  if (item.direction === "RECEIVE" || String(item.type || "").includes("RECEIVABLE")) return "Receivable";
+  if (item.direction === "PAY" || String(item.type || "").includes("PAYMENT")) return "Payment";
+  if (String(item.type || "").includes("OVERDUE")) return "Overdue";
+  return "Notification";
+}
+
+function CompactNotificationItem({ item, onOpen }) {
+  const isUnread = item.status === "UNREAD";
+  const isClickable = Boolean(item.obligation?._id || item.deepLink);
+  const content = (
+    <>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex min-w-0 items-start gap-2">
+          {isUnread && <span className="mt-1.5 size-2 shrink-0 rounded-full bg-primary" aria-label="Unread" />}
+          <h4 className="min-w-0 flex-1 truncate text-[13px] font-bold leading-5 text-charcoal">{item.title}</h4>
+        </div>
+        <p className="line-clamp-2 break-words text-[11px] font-semibold leading-4 text-muted">{item.message}</p>
+        <div className="flex items-center justify-between gap-2 pt-0.5">
+          <p className="truncate text-[10px] font-semibold text-muted">{formatNotificationTime(item.createdAt || item.reminderAt || item.scheduledFor)}</p>
+          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold ${isUnread ? "bg-violetSoft text-primary" : "bg-charcoal/5 text-muted"}`}>
+            {notificationCategoryLabel(item)}
+          </span>
+        </div>
+      </div>
+      {isClickable && <ChevronRight size={15} className="shrink-0 text-muted/70 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />}
+    </>
+  );
+  const className = `group flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition active:scale-[0.99] ${
+    isUnread
+      ? "border-primary/15 bg-white shadow-[0_8px_18px_rgba(55,42,82,0.06)] hover:border-primary/25 hover:bg-violetSoft/35"
+      : "border-charcoal/5 bg-white/65 hover:border-charcoal/10 hover:bg-white"
+  } ${isClickable ? "cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/35" : "cursor-default"}`;
+
+  if (!isClickable) {
+    return <article className={className}>{content}</article>;
+  }
+
+  return (
+    <button type="button" onClick={() => onOpen(item)} className={className} aria-label={`Open notification: ${item.title}`}>
+      {content}
+    </button>
+  );
+}
+
+function formatNotificationTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  const today = new Date();
+  const day = date.toDateString() === today.toDateString()
+    ? "Today"
+    : date.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  return `${day}, ${date.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}`;
+}
+
+function bufferToBase64Url(value) {
+  const bytes = new Uint8Array(value);
+  let binary = "";
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, locationKey, showToast, onNavigateToActivity, onNavigateToSettlements }) {
   const [period, setPeriod] = useState(readDashboardPeriod);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
@@ -1588,7 +1674,7 @@ function HomeDashboard({ refreshKey, user, onLogout, onThemeChange, onNavigate, 
   return (
     <ScreenShell className="home-dashboard-shell space-y-3 md:grid md:grid-cols-2 md:gap-3 md:space-y-0 xl:grid-cols-12 xl:gap-4">
       <div className="home-header-section md:col-span-2 xl:col-span-12 md:hidden">
-        <PremiumHeader user={user} onLogout={onLogout} onThemeChange={onThemeChange} onNavigate={onNavigate} locationKey={locationKey} refreshKey={refreshKey} />
+        <PremiumHeader user={user} onLogout={onLogout} onThemeChange={onThemeChange} onNavigate={onNavigate} locationKey={locationKey} refreshKey={refreshKey} showToast={showToast} />
       </div>
       <div className="home-period-section flex flex-wrap items-center justify-between gap-2 md:col-span-2 xl:col-span-12">
         <p className="text-xs font-medium text-muted">Activity for {selectedPeriodLabel}</p>
@@ -2132,131 +2218,78 @@ function SectionTitle({ title, action, onAction }) {
 }
 
 function useResource(resource, params = {}, refreshKey = 0) {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const paramsKey = JSON.stringify(params);
-
-  const load = async () => {
-    setLoading(true);
-      setError("");
-    try {
-      const data = await api.list(resource, params);
-      setItems(Array.isArray(data) ? data : []);
-    } catch (err) {
-      setError(err.message);
-      setItems([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const client = useQueryClient();
+  const mounted = useRef(false);
+  const enabled = true;
+  const staleTime = resource === "categories" || resource === "tags" ? 5 * 60_000 : resource === "activity" ? 20_000 : 30_000;
+  const query = useQuery({
+    queryKey: queryKeys.resource(resource, params),
+    queryFn: ({ signal }) => api.list(resource, params, { signal }),
+    enabled,
+    staleTime,
+    placeholderData: keepPreviousData
+  });
 
   useEffect(() => {
-    load();
-  }, [resource, refreshKey, paramsKey]);
-
-  const save = async (payload, id) => {
-    if (id) {
-      await api.update(resource, id, payload);
-    } else {
-      await api.create(resource, payload);
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
     }
-    await load();
-  };
+    if (enabled) client.invalidateQueries({ queryKey: queryKeys.resource(resource, params) });
+  }, [refreshKey]);
 
-  const remove = async (id) => {
-    await api.remove(resource, id);
-    await load();
-  };
+  const mutation = useMutation({
+    mutationFn: ({ payload, id, method }) => method === "remove" ? api.remove(resource, id) : id ? api.update(resource, id, payload) : api.create(resource, payload),
+    onSuccess: () => invalidateFinancialQueries(client, { type: `${resource}.changed` })
+  });
 
-  return { items, loading, error, save, remove, refresh: load };
+  return {
+    items: Array.isArray(query.data) ? query.data : [],
+    loading: query.isPending && !query.data,
+    fetching: query.isFetching,
+    error: query.error?.message || "",
+    save: (payload, id) => mutation.mutateAsync({ payload, id }),
+    remove: (id) => mutation.mutateAsync({ id, method: "remove" }),
+    refresh: () => query.refetch()
+  };
 }
 
 function useTransactionSummary(params = {}, refreshKey = 0) {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-  const paramsKey = JSON.stringify(params);
-
+  const client = useQueryClient();
+  const mounted = useRef(false);
+  const query = useQuery({
+    queryKey: queryKeys.summary(params),
+    queryFn: ({ signal }) => api.summary(params, { signal }),
+    staleTime: 30_000,
+    placeholderData: keepPreviousData
+  });
   useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    setError("");
-    setData(null);
-    api
-      .summary(params)
-      .then((summary) => {
-        if (alive) setData(summary);
-      })
-      .catch((err) => {
-        if (alive) setError(err.message);
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [refreshKey, paramsKey]);
-
-  const refresh = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      setData(await api.summary(params));
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
     }
-  };
-
-  return { data, error, loading, refresh };
+    client.invalidateQueries({ queryKey: queryKeys.summary(params) });
+  }, [refreshKey]);
+  return { data: query.data || null, error: query.error?.message || "", loading: query.isPending && !query.data, fetching: query.isFetching, refresh: () => query.refetch() };
 }
 
 function useTransactionReports(params = {}, refreshKey = 0) {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-  const paramsKey = JSON.stringify(params);
-
-  const load = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      setData(await api.reports(params));
-    } catch (err) {
-      setError(err.message);
-      setData(null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  const client = useQueryClient();
+  const mounted = useRef(false);
+  const query = useQuery({
+    queryKey: queryKeys.reports(params),
+    queryFn: ({ signal }) => api.reports(params, { signal }),
+    staleTime: 60_000,
+    placeholderData: keepPreviousData
+  });
   useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    setError("");
-    api
-      .reports(params)
-      .then((reports) => {
-        if (alive) setData(reports);
-      })
-      .catch((err) => {
-        if (alive) {
-          setError(err.message);
-          setData(null);
-        }
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [paramsKey, refreshKey]);
-
-  return { data, error, loading, refresh: load };
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    client.invalidateQueries({ queryKey: queryKeys.reports(params) });
+  }, [refreshKey]);
+  return { data: query.data || null, error: query.error?.message || "", loading: query.isPending && !query.data, fetching: query.isFetching, refresh: () => query.refetch() };
 }
 
 const defaultActivityFilters = {

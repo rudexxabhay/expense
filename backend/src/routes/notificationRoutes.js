@@ -10,6 +10,7 @@ import {
   getNotificationSettings,
   listPushDevices,
   savePushSubscription,
+  sendTestPush,
   removePushSubscription,
   pushStatus,
   updateNotificationSettings
@@ -23,6 +24,8 @@ router.get("/push/status", pushStatus);
 router.get("/push/devices", listPushDevices);
 router.post("/push/subscriptions", savePushSubscription);
 router.delete("/push/subscriptions", removePushSubscription);
+router.post("/test-push", sendTestPush);
+router.post("/push/test", sendTestPush);
 router.delete("/push/devices/:id", disablePushDevice);
 router.get("/settings", getNotificationSettings);
 router.patch("/settings", updateNotificationSettings);

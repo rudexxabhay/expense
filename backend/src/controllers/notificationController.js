@@ -7,7 +7,8 @@ import asyncHandler from "../middleware/asyncHandler.js";
 import ApiError from "../utils/ApiError.js";
 import { successResponse } from "../utils/apiResponse.js";
 import { processRecurringRules } from "./recurringController.js";
-import { deliverPush } from "../services/pushService.js";
+import { deliverPush, isVapidConfigured } from "../services/pushService.js";
+import PushDeliveryAttempt from "../models/PushDeliveryAttempt.js";
 import PushSubscription from "../models/PushSubscription.js";
 import { classifyDateState, normalizeFinanceTimeZone } from "../utils/financeRules.js";
 
@@ -325,6 +326,10 @@ export async function processScheduledNotifications() {
 }
 
 function filterMatch(filter) {
+  if (filter === "payments") return { direction: "PAY" };
+  if (filter === "receivables") return { direction: "RECEIVE" };
+  if (filter === "overdue") return { type: { $in: ["OVERDUE", "PAYMENT_OVERDUE", "RECEIVABLE_OVERDUE"] } };
+  if (filter === "system") return { type: "SYSTEM" };
   if (filter === "due_today_pay") return { type: { $in: ["DUE_TODAY", "PAYMENT_DUE_TODAY"] }, direction: "PAY" };
   if (filter === "due_today_receive") return { type: { $in: ["DUE_TODAY", "RECEIVABLE_DUE_TODAY"] }, direction: "RECEIVE" };
   if (filter === "upcoming_pay") return { type: { $in: ["TO_PAY", "PAYMENT_DUE_SOON", "LOAN_REPAYMENT_DUE"] }, direction: "PAY" };
@@ -350,6 +355,7 @@ export const listNotifications = asyncHandler(async (req, res) => {
     .populate("recurringRule", "name frequency amount");
   const unreadCount = await Notification.countDocuments({ userId: req.userId, status: "UNREAD" });
   const localized = notifications.map((item) => {
+    if (item.type === "SYSTEM") return item.toObject();
     const obligation = item.obligation;
     if (!obligation) {
       return { ...item.toObject(), title: "Reminder", message: "An older reminder is available. Open your obligations to review current details." };
@@ -392,7 +398,7 @@ export const archiveNotification = asyncHandler(async (req, res) => {
 });
 
 export const pushConfig = asyncHandler(async (req, res) => {
-  successResponse(res, { publicKey: process.env.VAPID_PUBLIC_KEY || "", configured: Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT) }, "Push configuration fetched");
+  successResponse(res, { publicKey: isVapidConfigured() ? process.env.VAPID_PUBLIC_KEY : "" }, "Push configuration fetched");
 });
 
 function inferPlatform(userAgent = "") {
@@ -440,7 +446,58 @@ export const removePushSubscription = asyncHandler(async (req, res) => {
 
 export const pushStatus = asyncHandler(async (req, res) => {
   const activeDevices = await PushSubscription.countDocuments({ userId: req.userId, isActive: true });
-  successResponse(res, { activeDevices, configured: Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT) }, "Push status fetched");
+  successResponse(res, { activeDevices, configured: isVapidConfigured() }, "Push status fetched");
+});
+
+export const sendTestPush = asyncHandler(async (req, res) => {
+  if (!isVapidConfigured()) throw new ApiError("Push delivery failed.", 424);
+  const activeDevices = await PushSubscription.countDocuments({ userId: req.userId, isActive: true });
+  if (!activeDevices) throw new ApiError("No active push subscription found.", 404);
+
+  const now = new Date();
+  const requestKey = String(req.get("Idempotency-Key") || "").trim().slice(0, 120);
+  const uniqueKey = requestKey || `${now.getTime()}`;
+  const notificationKey = `test-push:${req.userId}:${uniqueKey}`;
+  const existing = requestKey ? await Notification.findOne({ userId: req.userId, notificationKey }) : null;
+  if (existing) {
+    const attempts = await PushDeliveryAttempt.find({ userId: req.userId, notification: existing._id })
+      .select("subscription status errorCode createdAt sentAt")
+      .lean();
+    const sent = attempts.filter((attempt) => attempt.status === "SENT").length;
+    const disabled = attempts.filter((attempt) => attempt.status === "DISABLED").length;
+    const failed = attempts.filter((attempt) => attempt.status === "FAILED").length;
+    successResponse(res, { sent, failed, disabled, attempts, duplicate: true }, "Test push request already processed.");
+    return;
+  }
+  const notification = await Notification.create({
+    userId: req.userId,
+    notificationKey,
+    dedupeKey: notificationKey,
+    templateKey: "TEST_PUSH",
+    type: "SYSTEM",
+    title: "Test Notification",
+    message: "Push notifications are working on this device.",
+    body: "Push notifications are working on this device.",
+    deepLink: "/home",
+    direction: "NONE",
+    deliveryStatus: "PROCESSING",
+    scheduledFor: now,
+    reminderAt: now,
+    lastAttemptAt: now,
+    status: "UNREAD"
+  });
+
+  const outcome = await deliverPush(notification);
+  const update = { $addToSet: { deliveredDevices: { $each: outcome.deliveredDeviceIds || [] } } };
+  if (!outcome.sent) {
+    update.$set = { deliveryStatus: "FAILED", lastError: outcome.lastError || "Push delivery failed" };
+    await Notification.updateOne({ _id: notification._id, userId: req.userId }, update);
+    throw new ApiError(outcome.lastError === "No active push subscriptions" ? "No active push subscription found." : "Push delivery failed.", 424);
+  }
+
+  update.$set = { deliveryStatus: "SENT", sentAt: new Date(), lastError: "" };
+  await Notification.updateOne({ _id: notification._id, userId: req.userId }, update);
+  successResponse(res, { sent: outcome.sent, failed: outcome.failed, disabled: outcome.disabled, attempts: outcome.attempts }, "Test notification sent.");
 });
 
 export const listPushDevices = asyncHandler(async (req, res) => {

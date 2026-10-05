@@ -48,7 +48,8 @@ const notificationSchema = new mongoose.Schema(
         "PARTIAL_RECEIPT",
         "LOAN_REPAYMENT_DUE",
         "RECURRING_EXPENSE_REMINDER",
-        "GENERAL_FINANCIAL_REMINDER"
+        "GENERAL_FINANCIAL_REMINDER",
+        "SYSTEM"
       ]
     },
     title: { type: String, required: true, trim: true, maxlength: 180 },

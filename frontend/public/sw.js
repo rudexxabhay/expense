@@ -33,8 +33,16 @@ self.addEventListener("fetch", (event) => {
 self.addEventListener("push", (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data?.text() || "You have a new reminder." }; }
-  event.waitUntil(Promise.all([
-    self.registration.showNotification(data.title || "Expense reminder", {
+  const diagnostic = {
+    notificationId: data.notificationId || "",
+    title: data.title || "Expense reminder",
+    hasBody: Boolean(data.body)
+  };
+  console.info("[sw] push received", diagnostic);
+  const notifyClients = (message) => self.clients.matchAll({ type: "window", includeUncontrolled: true })
+    .then((clients) => clients.forEach((client) => client.postMessage({ type: "push-diagnostic", ...message })))
+    .catch(() => undefined);
+  const showNotification = self.registration.showNotification(data.title || "Expense reminder", {
       body: data.body || "Open the app to review your reminder.",
       icon: data.icon || "/icons/icon.svg",
       badge: data.badge || "/icons/icon.svg",
@@ -47,7 +55,18 @@ self.addEventListener("push", (event) => {
         obligationId: data.obligationId || "",
         sourceTransactionId: data.sourceTransactionId || ""
       }
-    }),
+    })
+    .then(() => {
+      console.info("[sw] showNotification executed", diagnostic);
+      return notifyClients({ stage: "showNotification", ok: true, notificationId: diagnostic.notificationId });
+    })
+    .catch((error) => {
+      console.error("[sw] showNotification failed", { ...diagnostic, message: error.message });
+      return notifyClients({ stage: "showNotification", ok: false, notificationId: diagnostic.notificationId, message: error.message });
+    });
+  event.waitUntil(Promise.all([
+    notifyClients({ stage: "push", ok: true, notificationId: diagnostic.notificationId }),
+    showNotification,
     self.registration.setAppBadge ? self.registration.setAppBadge(1).catch(() => undefined) : Promise.resolve()
   ]));
 });

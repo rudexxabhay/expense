@@ -19,5 +19,7 @@ const obligationSchema = new mongoose.Schema({
 
 obligationSchema.index({ userId: 1, sourceTransaction: 1 }, { unique: true });
 obligationSchema.index({ userId: 1, direction: 1, status: 1, dueDate: 1 });
+obligationSchema.index({ userId: 1, status: 1, remainingAmount: 1 });
+obligationSchema.index({ userId: 1, person: 1, direction: 1, status: 1 });
 
 export default mongoose.model("Obligation", obligationSchema);
